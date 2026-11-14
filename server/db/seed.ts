@@ -265,6 +265,46 @@ export function seedDatabase(db: DbInstance, force = false): void {
       '2026-11-11T08:15:00Z'
     );
 
+    insertUser.run(
+      'user_newbie',
+      'nova@novaevent.com',
+      demoPasswordHash,
+      'Nova Event',
+      'Organizasyon',
+      '+90 532 910 20 30',
+      '/src/assets/images/venue_cultural_foundation_1794582678466.jpg',
+      JSON.stringify(['business_owner']),
+      'business_owner',
+      null,
+      0,
+      1,
+      1,
+      'pending',
+      1,
+      'active',
+      '2026-11-10T16:20:00Z'
+    );
+
+    insertUser.run(
+      'user_erimtan',
+      'konser@erimtanmuzesi.org',
+      demoPasswordHash,
+      'Erimtan',
+      'Müze Sahne',
+      '+90 312 311 04 01',
+      '/src/assets/images/venue_cultural_foundation_1794582678466.jpg',
+      JSON.stringify(['venue_manager']),
+      'venue_manager',
+      null,
+      1,
+      1,
+      1,
+      'approved',
+      1,
+      'active',
+      '2026-10-28T09:30:00Z'
+    );
+
     // 3. Organizations & Members (Culture Desk 9.11)
     const insertOrg = db.prepare(`
       INSERT OR IGNORE INTO organizations (id, name, org_type, owner_user_id, city, tax_number, is_verified, managed_service_enabled, created_at)

@@ -51,7 +51,7 @@ import {
   INITIAL_EVENTS,
 } from '../data/seedData';
 import { CommissionModel } from '../utils/businessLogic';
-import { apiRequest } from '../services/api';
+import { apiRequest, setSessionToken } from '../services/api';
 
 export interface FilterState {
   searchQuery: string;
@@ -214,15 +214,20 @@ interface AppContextType {
   // Core Marketplace Actions
   updateArtistProfile: (profileData: Partial<IndividualProfile>) => AsyncActionResult;
   updateBusinessProfile: (profileData: Partial<BusinessProfile>) => AsyncActionResult;
+  updateEnsembleProfile: (ensembleId: string, profileData: Partial<Ensemble>) => AsyncActionResult;
   addEnsembleMember: (ensembleId: string, data: { name: string; instrument: string; roleTitle: string; email?: string }) => AsyncActionResult;
+  respondEnsembleInvite: (ensembleId: string, memberId: string, decision: 'accept' | 'decline') => AsyncActionResult;
   removeEnsembleMember: (ensembleId: string, memberId: string) => AsyncActionResult;
   createListing: (data: Partial<Listing>) => AsyncActionResult;
+  updateListing: (listingId: string, data: Partial<Listing>) => AsyncActionResult;
+  closeListing: (listingId: string) => AsyncActionResult;
   applyToListing: (
     listingId: string,
     message: string,
     applicantType: 'individual' | 'ensemble',
     participatingMembers?: string[]
   ) => AsyncActionResult;
+  withdrawApplication: (applicationId: string) => AsyncActionResult;
   shortlistApplication: (applicationId: string) => AsyncActionResult;
   rejectApplication: (applicationId: string) => AsyncActionResult;
   selectApplicantAndCreateBooking: (applicationId: string) => AsyncActionResult;
@@ -252,7 +257,11 @@ interface AppContextType {
   adminApproveVerification: (requestId: string) => AsyncActionResult;
   adminRejectVerification: (requestId: string, reason: string) => AsyncActionResult;
   adminUpdateCommission: (rate: number, model: CommissionModel) => AsyncActionResult;
-  moderateEntity: (entityType: 'listing' | 'event' | 'opportunity', id: string, decision: 'approve' | 'reject') => AsyncActionResult;
+  adminUpdateUserRoles: (userId: string, roles: RoleType[], activeRole?: RoleType) => AsyncActionResult;
+  adminUpdateUserStatus: (userId: string, status: 'active' | 'suspended') => AsyncActionResult;
+  adminVerifyVenue: (venueId: string, isVerified: boolean) => AsyncActionResult;
+  adminVerifyTechnicalProvider: (providerId: string, isVerified: boolean) => AsyncActionResult;
+  moderateEntity: (entityType: 'listing' | 'event' | 'opportunity' | 'project', id: string, decision: 'approve' | 'reject') => AsyncActionResult;
   moderateEventAnnouncement: (eventId: string, status: 'published' | 'rejected') => AsyncActionResult;
   resolveDispute: (disputeId: string, outcome: 'resolved_refund' | 'resolved_release', resolutionNote: string) => AsyncActionResult;
   toggleFeatureFlag: (flagKey: string, enabled: boolean) => AsyncActionResult;
@@ -260,6 +269,8 @@ interface AppContextType {
 
   // Events & Communications
   addEventAnnouncement: (data: Omit<EventAnnouncement, 'id' | 'createdAt' | 'status'>) => AsyncActionResult;
+  updateEventAnnouncement: (eventId: string, data: Partial<EventAnnouncement>) => AsyncActionResult;
+  deleteEventAnnouncement: (eventId: string) => AsyncActionResult;
   sendContactMessage: (data: { name: string; email: string; phone?: string; subject: string; message: string }) => AsyncActionResult;
   startConversation: (data: { contextType: string; contextId: string; title: string; participantUserIds: string[]; initialMessage?: string }) => AsyncActionResult;
   sendMessage: (conversationId: string, body: string) => AsyncActionResult;
@@ -346,6 +357,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data.runtimeConfig) setRuntimeConfig(data.runtimeConfig);
       if (Array.isArray(data.featureFlags)) setFeatureFlags(data.featureFlags);
       setCurrentUser(data.user || null);
+      if (!data.user) {
+        setSessionToken(null);
+      }
       if (Array.isArray(data.artists)) setArtists(data.artists);
       if (Array.isArray(data.ensembles)) setEnsembles(data.ensembles);
       if (Array.isArray(data.businesses)) setBusinesses(data.businesses);
@@ -561,6 +575,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         body: { email, password },
       });
+      if (data.sessionToken) setSessionToken(data.sessionToken);
       setCurrentUser(data.user);
       setAuthModalMode(null);
       return data;
@@ -572,6 +587,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         body: { email },
       });
+      if (data.sessionToken) setSessionToken(data.sessionToken);
       setCurrentUser(data.user);
       setAuthModalMode(null);
       return data;
@@ -592,6 +608,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         body: data,
       });
+      if (res.sessionToken) setSessionToken(res.sessionToken);
       setCurrentUser(res.user);
       setAuthModalMode(null);
       return res;
@@ -603,6 +620,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       // ignore
     }
+    setSessionToken(null);
     setCurrentUser(null);
     await refreshBootstrap();
     navigateTo('home');
@@ -643,8 +661,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBusinessProfile = (profileData: Partial<BusinessProfile>) =>
     wrap(() => apiRequest('/api/businesses/me', { method: 'PATCH', body: profileData }));
 
+  const updateEnsembleProfile = (ensembleId: string, profileData: Partial<Ensemble>) =>
+    wrap(() => apiRequest(`/api/ensembles/${ensembleId}`, { method: 'PATCH', body: profileData }));
+
   const addEnsembleMember = (ensembleId: string, data: { name: string; instrument: string; roleTitle: string; email?: string }) =>
     wrap(() => apiRequest(`/api/ensembles/${ensembleId}/members`, { method: 'POST', body: data }));
+
+  const respondEnsembleInvite = (ensembleId: string, memberId: string, decision: 'accept' | 'decline') =>
+    wrap(() => apiRequest(`/api/ensembles/${ensembleId}/members/${memberId}/respond`, { method: 'POST', body: { decision } }));
 
   const removeEnsembleMember = (ensembleId: string, memberId: string) =>
     wrap(() => apiRequest(`/api/ensembles/${ensembleId}/members/${memberId}`, { method: 'DELETE' }));
@@ -654,6 +678,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const res = await apiRequest('/api/listings', { method: 'POST', body: data });
       return { listingId: res.listing?.id, listing: res.listing };
     });
+
+  const updateListing = (listingId: string, data: Partial<Listing>) =>
+    wrap(async () => {
+      const res = await apiRequest(`/api/listings/${listingId}`, { method: 'PATCH', body: data });
+      return { listing: res.listing };
+    });
+
+  const closeListing = (listingId: string) =>
+    wrap(() => apiRequest(`/api/listings/${listingId}`, { method: 'DELETE' }));
 
   const applyToListing = (
     listingId: string,
@@ -667,6 +700,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: { listingId, message, applicantType, participatingMembers },
       })
     );
+
+  const withdrawApplication = (applicationId: string) =>
+    wrap(() => apiRequest(`/api/applications/${applicationId}`, { method: 'DELETE' }));
 
   const shortlistApplication = (applicationId: string) =>
     wrap(() => apiRequest(`/api/applications/${applicationId}/status`, { method: 'PATCH', body: { status: 'shortlisted' } }));
@@ -771,7 +807,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const adminUpdateCommission = (rate: number, model: CommissionModel) =>
     wrap(() => apiRequest('/api/admin/settings', { method: 'PATCH', body: { commissionRate: rate, commissionModel: model } }));
 
-  const moderateEntity = (entityType: 'listing' | 'event' | 'opportunity', id: string, decision: 'approve' | 'reject') =>
+  const adminUpdateUserRoles = (userId: string, roles: RoleType[], activeRole?: RoleType) =>
+    wrap(() => apiRequest(`/api/admin/users/${userId}/roles`, { method: 'PATCH', body: { roles, activeRole } }));
+
+  const adminUpdateUserStatus = (userId: string, status: 'active' | 'suspended') =>
+    wrap(() => apiRequest(`/api/admin/users/${userId}/status`, { method: 'PATCH', body: { status } }));
+
+  const adminVerifyVenue = (venueId: string, isVerified: boolean) =>
+    wrap(() => apiRequest(`/api/admin/venues/${venueId}/verify`, { method: 'POST', body: { isVerified } }));
+
+  const adminVerifyTechnicalProvider = (providerId: string, isVerified: boolean) =>
+    wrap(() => apiRequest(`/api/admin/technical-providers/${providerId}/verify`, { method: 'POST', body: { isVerified } }));
+
+  const moderateEntity = (entityType: 'listing' | 'event' | 'opportunity' | 'project', id: string, decision: 'approve' | 'reject') =>
     wrap(() => apiRequest(`/api/admin/moderation/${entityType}/${id}`, { method: 'POST', body: { decision } }));
 
   const moderateEventAnnouncement = (eventId: string, status: 'published' | 'rejected') =>
@@ -795,6 +843,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const res = await apiRequest('/api/events', { method: 'POST', body: data });
       return { eventId: res.event?.id, event: res.event };
     });
+
+  const updateEventAnnouncement = (eventId: string, data: Partial<EventAnnouncement>) =>
+    wrap(() => apiRequest(`/api/events/${eventId}`, { method: 'PATCH', body: data }));
+
+  const deleteEventAnnouncement = (eventId: string) =>
+    wrap(() => apiRequest(`/api/events/${eventId}`, { method: 'DELETE' }));
 
   const sendContactMessage = (data: { name: string; email: string; phone?: string; subject: string; message: string }) =>
     wrap(() => apiRequest('/api/contact', { method: 'POST', body: data }), false);
@@ -905,10 +959,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         originalsPrograms,
         updateArtistProfile,
         updateBusinessProfile,
+        updateEnsembleProfile,
         addEnsembleMember,
+        respondEnsembleInvite,
         removeEnsembleMember,
         createListing,
+        updateListing,
+        closeListing,
         applyToListing,
+        withdrawApplication,
         shortlistApplication,
         rejectApplication,
         selectApplicantAndCreateBooking,
@@ -928,12 +987,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminApproveVerification,
         adminRejectVerification,
         adminUpdateCommission,
+        adminUpdateUserRoles,
+        adminUpdateUserStatus,
+        adminVerifyVenue,
+        adminVerifyTechnicalProvider,
         moderateEntity,
         moderateEventAnnouncement,
         resolveDispute,
         toggleFeatureFlag,
         resetAllData,
         addEventAnnouncement,
+        updateEventAnnouncement,
+        deleteEventAnnouncement,
         sendContactMessage,
         startConversation,
         sendMessage,

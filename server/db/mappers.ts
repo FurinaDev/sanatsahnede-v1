@@ -98,11 +98,13 @@ export function mapEnsemble(db: DbInstance, row: any): Ensemble {
   const members: EnsembleMember[] = memberRows.map((m) => ({
     id: m.id,
     userId: m.user_id ?? undefined,
+    email: m.email ?? undefined,
     name: m.name,
     instrument: m.instrument as Instrument,
     roleTitle: m.role_title,
     joinedYear: Number(m.joined_year || 2024),
     avatarUrl: m.avatar_url,
+    status: (m.status as 'active' | 'invited' | 'declined') || 'active',
   }));
 
   return {
@@ -400,6 +402,7 @@ export function mapVerification(row: any): VerificationRequest {
 export function mapEvent(row: any): EventAnnouncement {
   return {
     id: row.id,
+    creatorUserId: row.creator_user_id ?? undefined,
     title: row.title,
     discipline: (row.discipline || 'Müzik') as ArtDiscipline,
     category: row.category,

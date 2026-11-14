@@ -106,6 +106,7 @@ export interface User {
   emailVerified?: boolean;
   phoneVerified?: boolean;
   kycStatus?: VerificationStatus | 'unsubmitted';
+  status?: 'active' | 'suspended';
   isDemo?: boolean;
   createdAt: string;
 }
@@ -155,11 +156,13 @@ export interface IndividualProfile {
 export interface EnsembleMember {
   id: string;
   userId?: string;
+  email?: string;
   name: string;
   instrument: Instrument;
   roleTitle: string; // e.g. "1. Keman & Topluluk Lideri"
   joinedYear: number;
   avatarUrl: string;
+  status?: 'active' | 'invited' | 'declined';
 }
 
 export interface Ensemble {
@@ -415,6 +418,7 @@ export interface PlatformSettings {
 
 export interface EventAnnouncement {
   id: string;
+  creatorUserId?: string;
   title: string;
   discipline?: ArtDiscipline;
   category: EventCategory;
@@ -742,7 +746,7 @@ export interface ProjectItem {
   isVolunteer: boolean;
   applicationDeadline: string;
   deliveryDate: string;
-  status: 'draft' | 'published' | 'recruiting' | 'in_production' | 'rehearsal' | 'completed' | 'archived';
+  status: 'draft' | 'pending_moderation' | 'published' | 'recruiting' | 'in_production' | 'rehearsal' | 'completed' | 'archived' | 'rejected';
   rolesNeeded: { id: string; roleTitle: string; discipline: string; count: number }[];
   members: { id: string; userId: string; name: string; roleTitle: string; status: 'invited' | 'active' | 'left' }[];
   tasks: { id: string; title: string; assigneeName: string; dueDate: string; status: 'todo' | 'doing' | 'done' }[];

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { AuditLogEntry } from '../types';
+import { AuditLogEntry, RoleType, User } from '../types';
 import { formatCurrencyTRY } from '../utils/businessLogic';
 import { apiRequest } from '../services/api';
 import {
@@ -8,9 +8,37 @@ import {
   FileText,
   RotateCcw,
   ShieldAlert,
+  ShieldCheck,
+  Users as UsersIcon,
+  Mail,
 } from 'lucide-react';
 
 const STAFF_ROLES = ['admin', 'moderator', 'finance_admin', 'verification_officer', 'support'];
+
+const ALL_ASSIGNABLE_ROLES: { role: RoleType; label: string }[] = [
+  { role: 'artist', label: 'Sanatçı' },
+  { role: 'ensemble_leader', label: 'Topluluk Lideri' },
+  { role: 'business_owner', label: 'İşletme / Kurum' },
+  { role: 'venue_manager', label: 'Mekân Yöneticisi' },
+  { role: 'technical_provider', label: 'Teknik Sağlayıcı' },
+  { role: 'organizer', label: 'Kültür Organizatörü' },
+  { role: 'audience', label: 'İzleyici' },
+  { role: 'moderator', label: 'Moderatör' },
+  { role: 'verification_officer', label: 'Doğrulama Uzmanı' },
+  { role: 'finance_admin', label: 'Finans Yöneticisi' },
+  { role: 'support', label: 'Destek' },
+  { role: 'admin', label: 'Yönetici (Admin)' },
+];
+
+interface ContactMessageRow {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  subject: string;
+  message: string;
+  created_at: string;
+}
 
 export const AdminPanel: React.FC = () => {
   const {
@@ -19,6 +47,10 @@ export const AdminPanel: React.FC = () => {
     activeRole,
     settings,
     adminUpdateCommission,
+    adminUpdateUserRoles,
+    adminUpdateUserStatus,
+    adminVerifyVenue,
+    adminVerifyTechnicalProvider,
     verifications,
     adminApproveVerification,
     adminRejectVerification,
@@ -28,6 +60,9 @@ export const AdminPanel: React.FC = () => {
     listings,
     events,
     opportunities,
+    projects,
+    venues,
+    technicalProviders,
     bookings,
     disputes,
     ledger,
@@ -36,7 +71,9 @@ export const AdminPanel: React.FC = () => {
     setAuthModalMode,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'kpis' | 'verifications' | 'moderation' | 'disputes' | 'ledger' | 'commission' | 'flags' | 'audit'>('kpis');
+  const [activeTab, setActiveTab] = useState<
+    'kpis' | 'verifications' | 'moderation' | 'disputes' | 'ledger' | 'commission' | 'flags' | 'users' | 'messages' | 'audit'
+  >('kpis');
   const [rejectReason, setRejectReason] = useState('');
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [commissionRate, setCommissionRate] = useState(settings.commissionRate);
@@ -44,17 +81,41 @@ export const AdminPanel: React.FC = () => {
   const [savedSettingsNotice, setSavedSettingsNotice] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [contactMessages, setContactMessages] = useState<ContactMessageRow[]>([]);
+  const [userRoleDrafts, setUserRoleDrafts] = useState<Record<string, RoleType[]>>({});
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
 
   const isStaff = isAuthenticated && STAFF_ROLES.includes(activeRole);
 
-  useEffect(() => {
-    if (isStaff) {
-      apiRequest<{ auditLogs: AuditLogEntry[] }>('/api/admin/overview')
-        .then((res) => setAuditLogs(res.auditLogs || []))
-        .catch(() => setAuditLogs([]));
+  const refreshOverview = useCallback(async () => {
+    if (!isStaff) return;
+    try {
+      const res = await apiRequest<{
+        auditLogs?: AuditLogEntry[];
+        users?: User[];
+        contactMessages?: ContactMessageRow[];
+      }>('/api/admin/overview');
+      setAuditLogs(res.auditLogs || []);
+      const loadedUsers = res.users || [];
+      setUsers(loadedUsers);
+      setContactMessages(res.contactMessages || []);
+      setUserRoleDrafts((prev) => {
+        const next: Record<string, RoleType[]> = { ...prev };
+        for (const u of loadedUsers) {
+          if (!next[u.id]) next[u.id] = u.roles || [];
+        }
+        return next;
+      });
+    } catch {
+      setAuditLogs([]);
     }
-  }, [isStaff, activeTab]);
+  }, [isStaff]);
+
+  useEffect(() => {
+    void refreshOverview();
+  }, [refreshOverview, activeTab]);
 
   if (!isAuthenticated) {
     return (
@@ -87,22 +148,113 @@ export const AdminPanel: React.FC = () => {
   const pendingListings = listings.filter((l) => l.status === 'pending_moderation');
   const pendingEvents = events.filter((e) => e.status === 'pending_moderation');
   const pendingOpportunities = opportunities.filter((o) => o.status === 'pending_moderation');
-  const totalModerationCount = pendingListings.length + pendingEvents.length + pendingOpportunities.length;
+  const pendingProjects = projects.filter((p) => p.status === 'pending_moderation');
+  const totalModerationCount =
+    pendingListings.length + pendingEvents.length + pendingOpportunities.length + pendingProjects.length;
 
   const handleSaveCommission = async (e: React.FormEvent) => {
     e.preventDefault();
     const res = await adminUpdateCommission(commissionRate, commissionModel);
     if (res.success) {
       setSavedSettingsNotice(true);
+      setFeedback({ type: 'success', text: 'Komisyon ayarları güncellendi.' });
       setTimeout(() => setSavedSettingsNotice(false), 3000);
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Komisyon ayarları güncellenemedi.' });
+    }
+  };
+
+  const handleApproveVerification = async (id: string) => {
+    const res = await adminApproveVerification(id);
+    if (res.success) {
+      setFeedback({ type: 'success', text: 'Doğrulama başvurusu onaylandı.' });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Doğrulama onaylanamadı.' });
     }
   };
 
   const handleConfirmReject = async () => {
     if (!rejectingId) return;
-    await adminRejectVerification(rejectingId, rejectReason || 'Belgeler sicil şartlarına uygun görülmedi.');
+    const res = await adminRejectVerification(rejectingId, rejectReason || 'Belgeler sicil şartlarına uygun görülmedi.');
     setRejectingId(null);
     setRejectReason('');
+    if (res.success) {
+      setFeedback({ type: 'success', text: 'Doğrulama başvurusu reddedildi ve profil güncellendi.' });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Doğrulama reddedilemedi.' });
+    }
+  };
+
+  const handleModerate = async (entityType: 'listing' | 'event' | 'opportunity' | 'project', id: string, decision: 'approve' | 'reject') => {
+    const res = await moderateEntity(entityType, id, decision);
+    if (res.success) {
+      setFeedback({ type: 'success', text: decision === 'approve' ? 'İçerik onaylanarak yayınlandı.' : 'İçerik reddedildi.' });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Moderasyon işlemi gerçekleştirilemedi.' });
+    }
+  };
+
+  const handleToggleUserRole = (userId: string, role: RoleType) => {
+    setUserRoleDrafts((prev) => {
+      const current = prev[userId] || [];
+      const exists = current.includes(role);
+      const next = exists ? current.filter((r) => r !== role) : [...current, role];
+      return { ...prev, [userId]: next };
+    });
+  };
+
+  const handleSaveUserRoles = async (userId: string, currentActiveRole: RoleType) => {
+    const roles = userRoleDrafts[userId] || [];
+    if (roles.length === 0) {
+      setFeedback({ type: 'error', text: 'Kullanıcı için en az bir rol seçilmelidir.' });
+      return;
+    }
+    const nextActive = roles.includes(currentActiveRole) ? currentActiveRole : roles[0];
+    const res = await adminUpdateUserRoles(userId, roles, nextActive);
+    if (res.success) {
+      setFeedback({ type: 'success', text: 'Kullanıcı rolleri güncellendi.' });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Kullanıcı rolleri güncellenemedi.' });
+    }
+  };
+
+  const handleToggleUserStatus = async (user: User) => {
+    const nextStatus = user.status === 'suspended' ? 'active' : 'suspended';
+    const res = await adminUpdateUserStatus(user.id, nextStatus);
+    if (res.success) {
+      setFeedback({
+        type: 'success',
+        text: nextStatus === 'suspended' ? `${user.email} askıya alındı.` : `${user.email} yeniden aktifleştirildi.`,
+      });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Kullanıcı durumu değiştirilemedi.' });
+    }
+  };
+
+  const handleVerifyVenue = async (venueId: string, nextVerified: boolean) => {
+    const res = await adminVerifyVenue(venueId, nextVerified);
+    if (res.success) {
+      setFeedback({ type: 'success', text: nextVerified ? 'Mekân doğrulandı.' : 'Mekân doğrulaması kaldırıldı.' });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Mekân doğrulama durumu güncellenemedi.' });
+    }
+  };
+
+  const handleVerifyTechProvider = async (providerId: string, nextVerified: boolean) => {
+    const res = await adminVerifyTechnicalProvider(providerId, nextVerified);
+    if (res.success) {
+      setFeedback({ type: 'success', text: nextVerified ? 'Teknik sağlayıcı doğrulandı.' : 'Teknik sağlayıcı doğrulaması kaldırıldı.' });
+      await refreshOverview();
+    } else {
+      setFeedback({ type: 'error', text: res.error || 'Teknik sağlayıcı doğrulama durumu güncellenemedi.' });
+    }
   };
 
   return (
@@ -159,6 +311,8 @@ export const AdminPanel: React.FC = () => {
             { id: 'ledger', label: `Finansal Defter (${ledger.length})` },
             { id: 'commission', label: 'Komisyon' },
             { id: 'flags', label: 'Özellik Bayrakları' },
+            ...(activeRole === 'admin' ? [{ id: 'users', label: `Kullanıcılar (${users.length})` }] : []),
+            { id: 'messages', label: `İletişim Mesajları (${contactMessages.length})` },
             { id: 'audit', label: 'Denetim Logları' },
           ].map((tab) => (
             <button
@@ -174,6 +328,22 @@ export const AdminPanel: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {feedback && (
+        <div
+          role={feedback.type === 'error' ? 'alert' : 'status'}
+          className={`p-4 rounded-2xl border text-xs font-medium flex items-center justify-between gap-3 ${
+            feedback.type === 'error'
+              ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+              : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
+          }`}
+        >
+          <span>{feedback.text}</span>
+          <button type="button" onClick={() => setFeedback(null)} className="hover:underline shrink-0 cursor-pointer">
+            Kapat
+          </button>
+        </div>
+      )}
 
       {activeTab === 'kpis' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -197,40 +367,107 @@ export const AdminPanel: React.FC = () => {
       )}
 
       {activeTab === 'verifications' && (
-        <div className="bg-white dark:bg-[#13213e] p-6 sm:p-8 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-4">
-          <h2 className="font-display text-lg font-bold text-[#0f172a] dark:text-white">Akreditasyon &amp; Belge İnceleme Havuzu</h2>
-          {verifications.length === 0 ? (
-            <p className="text-xs text-[#64748b]">Doğrulama başvurusu bulunmamaktadır.</p>
-          ) : (
-            verifications.map((v) => (
-              <div key={v.id} className="p-5 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="font-bold text-sm text-[#0f172a] dark:text-white">{v.entityName} ({v.accountType})</div>
-                  <div className="text-xs text-[#475569] dark:text-slate-300 flex flex-wrap gap-2">
-                    {v.documents.map((doc, i) => (
-                      <a key={i} href={doc.url} target="_blank" rel="noreferrer" className="underline flex items-center gap-1">
-                        <FileText className="w-3.5 h-3.5" /> {doc.title}
-                      </a>
-                    ))}
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-[#13213e] p-6 sm:p-8 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-4">
+            <h2 className="font-display text-lg font-bold text-[#0f172a] dark:text-white">Akreditasyon &amp; Belge İnceleme Havuzu</h2>
+            {verifications.length === 0 ? (
+              <p className="text-xs text-[#64748b]">Doğrulama başvurusu bulunmamaktadır.</p>
+            ) : (
+              verifications.map((v) => (
+                <div key={v.id} className="p-5 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="font-bold text-sm text-[#0f172a] dark:text-white">{v.entityName} ({v.accountType})</div>
+                    <div className="text-xs text-[#475569] dark:text-slate-300 flex flex-wrap gap-2">
+                      {v.documents.map((doc, i) => (
+                        <a key={i} href={doc.url} target="_blank" rel="noreferrer" className="underline flex items-center gap-1">
+                          <FileText className="w-3.5 h-3.5" /> {doc.title}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {v.status === 'pending' ? (
+                      <>
+                        <button type="button" onClick={() => handleApproveVerification(v.id)} className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 rounded-xl flex items-center gap-1 cursor-pointer">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Onayla
+                        </button>
+                        <button type="button" onClick={() => setRejectingId(v.id)} className="px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 rounded-xl cursor-pointer">
+                          Reddet
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800">{v.status}</span>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {v.status === 'pending' ? (
-                    <>
-                      <button type="button" onClick={() => adminApproveVerification(v.id)} className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 rounded-xl flex items-center gap-1 cursor-pointer">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Onayla
+              ))
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-[#13213e] p-6 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-4">
+              <h3 className="font-display text-base font-bold text-[#0f172a] dark:text-white">Mekân Doğrulama</h3>
+              {venues.length === 0 ? (
+                <p className="text-xs text-[#64748b]">Kayıtlı mekân yok.</p>
+              ) : (
+                <div className="space-y-3">
+                  {venues.map((v) => (
+                    <div key={v.id} className="p-4 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-bold text-[#0f172a] dark:text-white flex items-center gap-1.5">
+                          <span>{v.name}</span>
+                          {v.isVerified && <ShieldCheck className="w-4 h-4 text-emerald-600" />}
+                        </div>
+                        <div className="text-xs text-[#64748b]">
+                          {v.city}
+                          {v.district ? `, ${v.district}` : ''} · {v.spaces?.length || 0} Salon
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyVenue(v.id, !v.isVerified)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                          v.isVerified ? 'bg-slate-200 dark:bg-slate-800 text-[#0f172a] dark:text-white' : 'bg-emerald-700 text-white'
+                        }`}
+                      >
+                        {v.isVerified ? 'Doğrulamayı Kaldır' : 'Mekânı Doğrula'}
                       </button>
-                      <button type="button" onClick={() => setRejectingId(v.id)} className="px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 rounded-xl cursor-pointer">
-                        Reddet
-                      </button>
-                    </>
-                  ) : (
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800">{v.status}</span>
-                  )}
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))
-          )}
+              )}
+            </div>
+
+            <div className="bg-white dark:bg-[#13213e] p-6 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-4">
+              <h3 className="font-display text-base font-bold text-[#0f172a] dark:text-white">Teknik Sağlayıcı Doğrulama</h3>
+              {technicalProviders.length === 0 ? (
+                <p className="text-xs text-[#64748b]">Kayıtlı teknik sağlayıcı yok.</p>
+              ) : (
+                <div className="space-y-3">
+                  {technicalProviders.map((tp) => (
+                    <div key={tp.id} className="p-4 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-bold text-[#0f172a] dark:text-white flex items-center gap-1.5">
+                          <span>{tp.name}</span>
+                          {tp.isVerified && <ShieldCheck className="w-4 h-4 text-emerald-600" />}
+                        </div>
+                        <div className="text-xs text-[#64748b]">{tp.city} · {(tp.categories || []).join(', ')}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyTechProvider(tp.id, !tp.isVerified)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                          tp.isVerified ? 'bg-slate-200 dark:bg-slate-800 text-[#0f172a] dark:text-white' : 'bg-emerald-700 text-white'
+                        }`}
+                      >
+                        {tp.isVerified ? 'Doğrulamayı Kaldır' : 'Sağlayıcıyı Doğrula'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -238,7 +475,7 @@ export const AdminPanel: React.FC = () => {
         <div className="bg-white dark:bg-[#13213e] p-6 sm:p-8 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-6">
           <h2 className="font-display text-lg font-bold text-[#0f172a] dark:text-white">İçerik Ön Moderasyon Kuyruğu</h2>
           {totalModerationCount === 0 ? (
-            <p className="text-xs text-[#64748b]">Moderasyon bekleyen ilan, etkinlik veya fırsat bulunmamaktadır.</p>
+            <p className="text-xs text-[#64748b]">Moderasyon bekleyen ilan, etkinlik, fırsat veya proje bulunmamaktadır.</p>
           ) : (
             <div className="space-y-4">
               {pendingListings.map((l) => (
@@ -249,8 +486,8 @@ export const AdminPanel: React.FC = () => {
                     <div className="text-xs text-[#64748b]">{l.businessName} · {l.city} · {formatCurrencyTRY(l.budgetAmount)}</div>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => moderateEntity('listing', l.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
-                    <button type="button" onClick={() => moderateEntity('listing', l.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
+                    <button type="button" onClick={() => handleModerate('listing', l.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
+                    <button type="button" onClick={() => handleModerate('listing', l.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
                   </div>
                 </div>
               ))}
@@ -262,8 +499,8 @@ export const AdminPanel: React.FC = () => {
                     <div className="text-xs text-[#64748b]">{ev.venueName}, {ev.city} · {ev.eventDate}</div>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => moderateEntity('event', ev.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
-                    <button type="button" onClick={() => moderateEntity('event', ev.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
+                    <button type="button" onClick={() => handleModerate('event', ev.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
+                    <button type="button" onClick={() => handleModerate('event', ev.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
                   </div>
                 </div>
               ))}
@@ -275,8 +512,21 @@ export const AdminPanel: React.FC = () => {
                     <div className="text-xs text-[#64748b]">{op.organizerName} · {op.rewardInfo}</div>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => moderateEntity('opportunity', op.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
-                    <button type="button" onClick={() => moderateEntity('opportunity', op.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
+                    <button type="button" onClick={() => handleModerate('opportunity', op.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
+                    <button type="button" onClick={() => handleModerate('opportunity', op.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
+                  </div>
+                </div>
+              ))}
+              {pendingProjects.map((pr) => (
+                <div key={pr.id} className="p-4 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-[#f25922]">Proje Laboratuvarı</span>
+                    <div className="text-sm font-bold text-[#0f172a] dark:text-white">{pr.title}</div>
+                    <div className="text-xs text-[#64748b]">{pr.city} · {(pr.disciplines || []).join(', ')}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => handleModerate('project', pr.id, 'approve')} className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">Yayınla</button>
+                    <button type="button" onClick={() => handleModerate('project', pr.id, 'reject')} className="px-3.5 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer">Reddet</button>
                   </div>
                 </div>
               ))}
@@ -407,7 +657,14 @@ export const AdminPanel: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => toggleFeatureFlag(flag.flagKey, !flag.enabled)}
+                  onClick={async () => {
+                    const res = await toggleFeatureFlag(flag.flagKey, !flag.enabled);
+                    if (res.success) {
+                      setFeedback({ type: 'success', text: `${flag.label} durumu güncellendi.` });
+                    } else {
+                      setFeedback({ type: 'error', text: res.error || 'Özellik bayrağı değiştirilemedi.' });
+                    }
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${
                     flag.enabled ? 'bg-emerald-700 text-white' : 'bg-slate-300 text-slate-800'
                   }`}
@@ -417,6 +674,110 @@ export const AdminPanel: React.FC = () => {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'users' && activeRole === 'admin' && (
+        <div className="bg-white dark:bg-[#13213e] p-6 sm:p-8 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-4">
+          <div className="flex items-center gap-2">
+            <UsersIcon className="w-5 h-5 text-[#f25922]" />
+            <h2 className="font-display text-lg font-bold text-[#0f172a] dark:text-white">Kullanıcı Yetki ve Hesap Durumu Yönetimi</h2>
+          </div>
+          {users.length === 0 ? (
+            <p className="text-xs text-[#64748b]">Kullanıcı listesi yükleniyor...</p>
+          ) : (
+            <div className="space-y-4">
+              {users.map((u) => {
+                const draftRoles = userRoleDrafts[u.id] || u.roles;
+                const isSelf = u.id === currentUser.id;
+                const isSuspended = u.status === 'suspended';
+                return (
+                  <div key={u.id} className="p-4 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-[#0f172a] dark:text-white">
+                            {u.firstName} {u.lastName}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                              isSuspended ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {isSuspended ? 'Askıda' : 'Aktif'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-[#64748b]">{u.email} · Aktif Rol: {u.activeRole}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveUserRoles(u.id, u.activeRole)}
+                          className="px-3.5 py-1.5 rounded-xl bg-[#16274e] text-white text-xs font-bold cursor-pointer"
+                        >
+                          Rolleri Kaydet
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSelf}
+                          onClick={() => handleToggleUserStatus(u)}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-40 ${
+                            isSuspended ? 'bg-emerald-700 text-white' : 'bg-rose-700 text-white'
+                          }`}
+                        >
+                          {isSuspended ? 'Aktifleştir' : 'Askıya Al'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-2 border-t border-[#e2e8f0] dark:border-[#1e335a]">
+                      {ALL_ASSIGNABLE_ROLES.map((item) => {
+                        const checked = draftRoles.includes(item.role);
+                        return (
+                          <label key={item.role} className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-lg bg-white dark:bg-[#13213e] border border-[#e2e8f0] dark:border-[#1e335a] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => handleToggleUserRole(u.id, item.role)}
+                              className="accent-[#f25922]"
+                            />
+                            <span>{item.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'messages' && (
+        <div className="bg-white dark:bg-[#13213e] p-6 sm:p-8 rounded-3xl border border-[#e2e8f0] dark:border-[#1e335a] space-y-4">
+          <div className="flex items-center gap-2">
+            <Mail className="w-5 h-5 text-[#f25922]" />
+            <h2 className="font-display text-lg font-bold text-[#0f172a] dark:text-white">Gelen İletişim Mesajları</h2>
+          </div>
+          {contactMessages.length === 0 ? (
+            <p className="text-xs text-[#64748b]">Henüz iletişim formu üzerinden gelen mesaj bulunmamaktadır.</p>
+          ) : (
+            <div className="space-y-3">
+              {contactMessages.map((msg) => (
+                <div key={msg.id} className="p-4 rounded-2xl bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] space-y-1.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-[#0f172a] dark:text-white">{msg.subject}</span>
+                    <span className="text-[#64748b] tabular-nums">{String(msg.created_at).slice(0, 16).replace('T', ' ')}</span>
+                  </div>
+                  <div className="text-[#475569] dark:text-slate-300">
+                    <strong>{msg.name}</strong> ({msg.email}{msg.phone ? ` · ${msg.phone}` : ''})
+                  </div>
+                  <p className="text-[#0f172a] dark:text-slate-200 pt-1">{msg.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

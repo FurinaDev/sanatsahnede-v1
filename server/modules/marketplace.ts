@@ -109,6 +109,53 @@ function createContractAndProductionForBooking(db: DbInstance, booking: any) {
   }
 }
 
+function hasBookedPerformerConflict(
+  db: DbInstance,
+  performerId: string,
+  eventDate: string,
+  startTime: string,
+  endTime: string,
+  excludeBookingId?: string
+): { conflict: boolean; label?: string } {
+  const bookedSlots = db
+    .prepare(`SELECT title, slot_date, start_time, end_time, notes FROM availability_slots WHERE owner_id = ? AND slot_date = ? AND slot_kind = 'booked'`)
+    .all(performerId, eventDate) as any[];
+
+  for (const s of bookedSlots) {
+    if (excludeBookingId && typeof s.notes === 'string' && s.notes.includes(`Booking #${excludeBookingId}`)) {
+      continue;
+    }
+    if (
+      hasTimeConflict(
+        { date: eventDate, startTime: startTime || '20:00', endTime: endTime || '21:30' },
+        { date: s.slot_date, startTime: s.start_time, endTime: s.end_time }
+      )
+    ) {
+      return { conflict: true, label: `${s.slot_date} ${s.start_time}-${s.end_time} (${s.title})` };
+    }
+  }
+
+  const confirmedBookings = db
+    .prepare(
+      `SELECT id, listing_title, event_date, start_time, end_time FROM bookings WHERE performer_id = ? AND event_date = ? AND status IN ('confirmed', 'performer_completed', 'employer_completed')`
+    )
+    .all(performerId, eventDate) as any[];
+
+  for (const b of confirmedBookings) {
+    if (excludeBookingId && b.id === excludeBookingId) continue;
+    if (
+      hasTimeConflict(
+        { date: eventDate, startTime: startTime || '20:00', endTime: endTime || '21:30' },
+        { date: b.event_date, startTime: b.start_time || '20:00', endTime: b.end_time || '21:30' }
+      )
+    ) {
+      return { conflict: true, label: `${b.event_date} ${b.start_time || '20:00'}-${b.end_time || '21:30'} (${b.listing_title})` };
+    }
+  }
+
+  return { conflict: false };
+}
+
 function finalizePaymentHold(
   db: DbInstance,
   bookingRow: any,
@@ -150,10 +197,16 @@ function finalizePaymentHold(
   }
 
   // Block performer availability slot for date conflict protection
-  const existingSlot = db
-    .prepare(`SELECT id FROM availability_slots WHERE owner_id = ? AND slot_date = ? AND slot_kind = 'booked'`)
-    .get(bookingRow.performer_id, bookingRow.event_date);
-  if (!existingSlot) {
+  const existingSlots = db
+    .prepare(`SELECT slot_date, start_time, end_time FROM availability_slots WHERE owner_id = ? AND slot_date = ? AND slot_kind = 'booked'`)
+    .all(bookingRow.performer_id, bookingRow.event_date) as any[];
+  const alreadyBooked = existingSlots.some((s) =>
+    hasTimeConflict(
+      { date: bookingRow.event_date, startTime: bookingRow.start_time || '20:00', endTime: bookingRow.end_time || '21:30' },
+      { date: s.slot_date, startTime: s.start_time, endTime: s.end_time }
+    )
+  );
+  if (!alreadyBooked) {
     db.prepare(`
       INSERT INTO availability_slots (
         id, owner_type, owner_id, owner_user_id, owner_name, title, slot_date,
@@ -308,6 +361,135 @@ export function createMarketplaceRouter(db: DbInstance): Router {
     return res.status(201).json({ listing: mapListing(created) });
   });
 
+  // Update Listing (business owner or admin while editable)
+  router.patch('/listings/:id', requireAuth, (req: AuthedRequest, res) => {
+    const listingRow = db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id) as any;
+    if (!listingRow) return res.status(404).json({ error: 'İlan bulunamadı.' });
+    const biz = db.prepare('SELECT user_id FROM business_profiles WHERE id = ?').get(listingRow.business_id) as any;
+    if ((!biz || biz.user_id !== req.user!.id) && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu ilanı düzenleme yetkiniz yok.' });
+    }
+    if (!['draft', 'pending_moderation', 'active'].includes(listingRow.status)) {
+      return res.status(400).json({ error: 'Yalnızca taslak, onay bekleyen veya aktif ilanlar düzenlenebilir.' });
+    }
+
+    const {
+      title,
+      description,
+      discipline,
+      eventType,
+      genres,
+      targetEnsembleType,
+      requiredInstruments,
+      performerCount,
+      durationMins,
+      eventDate,
+      startTime,
+      endTime,
+      applicationDeadline,
+      city,
+      district,
+      venueName,
+      isOutdoor,
+      repertoireExpectation,
+      dressCode,
+      soundSystemProvided,
+      transportationProvided,
+      accommodationProvided,
+      budgetAmount,
+    } = req.body || {};
+
+    if (budgetAmount !== undefined && Number(budgetAmount) <= 0) {
+      return res.status(400).json({ error: 'Geçerli bir bütçe tutarı giriniz.' });
+    }
+
+    db.prepare(`
+      UPDATE listings SET
+        title = COALESCE(?, title),
+        description = COALESCE(?, description),
+        discipline = COALESCE(?, discipline),
+        event_type = COALESCE(?, event_type),
+        genres_json = COALESCE(?, genres_json),
+        target_ensemble_type = COALESCE(?, target_ensemble_type),
+        required_instruments_json = COALESCE(?, required_instruments_json),
+        performer_count = COALESCE(?, performer_count),
+        duration_mins = COALESCE(?, duration_mins),
+        event_date = COALESCE(?, event_date),
+        start_time = COALESCE(?, start_time),
+        end_time = COALESCE(?, end_time),
+        application_deadline = COALESCE(?, application_deadline),
+        city = COALESCE(?, city),
+        district = COALESCE(?, district),
+        venue_name = COALESCE(?, venue_name),
+        is_outdoor = COALESCE(?, is_outdoor),
+        repertoire_expectation = COALESCE(?, repertoire_expectation),
+        dress_code = COALESCE(?, dress_code),
+        sound_system_provided = COALESCE(?, sound_system_provided),
+        transportation_provided = COALESCE(?, transportation_provided),
+        accommodation_provided = COALESCE(?, accommodation_provided),
+        budget_amount = COALESCE(?, budget_amount)
+      WHERE id = ?
+    `).run(
+      title !== undefined ? String(title).trim() : null,
+      description !== undefined ? String(description).trim() : null,
+      discipline ?? null,
+      eventType ?? null,
+      genres !== undefined ? JSON.stringify(Array.isArray(genres) ? genres : []) : null,
+      targetEnsembleType ?? null,
+      requiredInstruments !== undefined ? JSON.stringify(Array.isArray(requiredInstruments) ? requiredInstruments : []) : null,
+      performerCount !== undefined ? Number(performerCount) : null,
+      durationMins !== undefined ? Number(durationMins) : null,
+      eventDate ?? null,
+      startTime ?? null,
+      endTime ?? null,
+      applicationDeadline ?? null,
+      city ?? null,
+      district ?? null,
+      venueName ?? null,
+      isOutdoor !== undefined ? (isOutdoor ? 1 : 0) : null,
+      repertoireExpectation ?? null,
+      dressCode ?? null,
+      soundSystemProvided !== undefined ? (soundSystemProvided ? 1 : 0) : null,
+      transportationProvided !== undefined ? (transportationProvided ? 1 : 0) : null,
+      accommodationProvided !== undefined ? (accommodationProvided ? 1 : 0) : null,
+      budgetAmount !== undefined ? Number(budgetAmount) : null,
+      listingRow.id
+    );
+
+    logAudit(db, {
+      userId: req.user!.id,
+      action: 'UPDATE_LISTING',
+      resourceType: 'listing',
+      resourceId: listingRow.id,
+    });
+
+    const updated = db.prepare('SELECT * FROM listings WHERE id = ?').get(listingRow.id);
+    return res.json({ listing: mapListing(updated) });
+  });
+
+  // Cancel / Close Listing (business owner or admin)
+  router.delete('/listings/:id', requireAuth, (req: AuthedRequest, res) => {
+    const listingRow = db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id) as any;
+    if (!listingRow) return res.status(404).json({ error: 'İlan bulunamadı.' });
+    const biz = db.prepare('SELECT user_id FROM business_profiles WHERE id = ?').get(listingRow.business_id) as any;
+    if ((!biz || biz.user_id !== req.user!.id) && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu ilanı kapatma yetkiniz yok.' });
+    }
+    if (listingRow.status === 'assigned' || listingRow.status === 'completed') {
+      return res.status(400).json({ error: 'Atanmış veya tamamlanmış ilan doğrudan silinemez.' });
+    }
+
+    db.prepare(`UPDATE listings SET status = 'cancelled' WHERE id = ?`).run(listingRow.id);
+    logAudit(db, {
+      userId: req.user!.id,
+      action: 'CANCEL_LISTING',
+      resourceType: 'listing',
+      resourceId: listingRow.id,
+    });
+    const updated = db.prepare('SELECT * FROM listings WHERE id = ?').get(listingRow.id);
+    return res.json({ success: true, listing: mapListing(updated) });
+  });
+
   // 9.7 Explainable Smart Match for a Listing
   router.get('/listings/:id/smart-match', (req, res) => {
     const row = db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id) as any;
@@ -399,9 +581,9 @@ export function createMarketplaceRouter(db: DbInstance): Router {
       genres = parseJson(ind.genres_json, ['Klasik Müzik']);
     }
 
-    // Check duplicate application
+    // Check duplicate active/non-withdrawn application
     const duplicate = db
-      .prepare('SELECT id FROM applications WHERE listing_id = ? AND applicant_id = ?')
+      .prepare(`SELECT id FROM applications WHERE listing_id = ? AND applicant_id = ? AND status != 'withdrawn'`)
       .get(listingId, resolvedApplicantId);
     if (duplicate) {
       return res.status(409).json({ error: 'Bu ilana daha önce başvuru yaptınız.' });
@@ -469,6 +651,31 @@ export function createMarketplaceRouter(db: DbInstance): Router {
     });
   });
 
+  // Withdraw Application (applicant owner or admin)
+  router.delete('/applications/:id', requireAuth, (req: AuthedRequest, res) => {
+    const appRow = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id) as any;
+    if (!appRow) return res.status(404).json({ error: 'Başvuru bulunamadı.' });
+    if (appRow.applicant_user_id !== req.user!.id && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu başvuruyu geri çekme yetkiniz yok.' });
+    }
+    if (!['submitted', 'shortlisted'].includes(appRow.status)) {
+      return res.status(400).json({ error: 'Yalnızca değerlendirme aşamasındaki başvurular geri çekilebilir.' });
+    }
+
+    db.prepare(`UPDATE applications SET status = 'withdrawn' WHERE id = ?`).run(appRow.id);
+    db.prepare('UPDATE listings SET applications_count = MAX(0, applications_count - 1) WHERE id = ?').run(appRow.listing_id);
+
+    logAudit(db, {
+      userId: req.user!.id,
+      action: 'WITHDRAW_APPLICATION',
+      resourceType: 'application',
+      resourceId: appRow.id,
+    });
+
+    const updated = db.prepare('SELECT * FROM applications WHERE id = ?').get(appRow.id);
+    return res.json({ success: true, application: mapApplication(updated) });
+  });
+
   // Update Application Status (shortlist / reject / select -> creates Booking + Contract)
   router.patch('/applications/:id/status', requireAuth, (req: AuthedRequest, res) => {
     const appRow = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id) as any;
@@ -484,6 +691,24 @@ export function createMarketplaceRouter(db: DbInstance): Router {
     const { status } = req.body || {};
     if (!['shortlisted', 'rejected', 'selected'].includes(status)) {
       return res.status(400).json({ error: 'Geçersiz başvuru durumu.' });
+    }
+    if (appRow.status === 'withdrawn') {
+      return res.status(400).json({ error: 'Sanatçı tarafından geri çekilmiş başvuru seçilemez.' });
+    }
+
+    if (status === 'selected') {
+      const conflictCheck = hasBookedPerformerConflict(
+        db,
+        appRow.applicant_id,
+        listingRow.event_date,
+        listingRow.start_time,
+        listingRow.end_time
+      );
+      if (conflictCheck.conflict) {
+        return res.status(409).json({
+          error: `Sanatçının/topluluğun ${conflictCheck.label} için onaylı başka bir sahne rezervasyonu bulunuyor; aynı saatte ikinci rezervasyon oluşturulamaz.`,
+        });
+      }
     }
 
     db.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appRow.id);
@@ -685,6 +910,10 @@ export function createMarketplaceRouter(db: DbInstance): Router {
     if (['accepted', 'rejected', 'expired'].includes(offerRow.status)) {
       return res.status(400).json({ error: 'Sonuçlanmış teklife karşı teklif gönderilemez.' });
     }
+    if (offerRow.expires_at && new Date(offerRow.expires_at).getTime() < Date.now()) {
+      db.prepare(`UPDATE offers SET status = 'expired', updated_at = ? WHERE id = ?`).run(new Date().toISOString(), offerRow.id);
+      return res.status(400).json({ error: 'Bu teklifin geçerlilik süresi dolmuştur.' });
+    }
 
     const { proposedAmount, scopeNotes = '' } = req.body || {};
     const amount = Number(proposedAmount);
@@ -738,8 +967,25 @@ export function createMarketplaceRouter(db: DbInstance): Router {
     if (offerRow.last_actor_user_id === req.user!.id) {
       return res.status(400).json({ error: 'Kendi gönderdiğiniz son teklifi karşı taraf onaylamalıdır.' });
     }
-    if (['accepted', 'rejected'].includes(offerRow.status)) {
+    if (['accepted', 'rejected', 'expired'].includes(offerRow.status)) {
       return res.status(400).json({ error: 'Bu teklif zaten sonuçlandırılmış.' });
+    }
+    if (offerRow.expires_at && new Date(offerRow.expires_at).getTime() < Date.now()) {
+      db.prepare(`UPDATE offers SET status = 'expired', updated_at = ? WHERE id = ?`).run(new Date().toISOString(), offerRow.id);
+      return res.status(400).json({ error: 'Bu teklifin geçerlilik süresi dolmuştur.' });
+    }
+
+    const conflictCheck = hasBookedPerformerConflict(
+      db,
+      offerRow.performer_id,
+      offerRow.event_date,
+      offerRow.start_time,
+      offerRow.end_time
+    );
+    if (conflictCheck.conflict) {
+      return res.status(409).json({
+        error: `Çift rezervasyon koruması: ${conflictCheck.label} tarihinde icracının onaylı başka bir sahne kaydı mevcut.`,
+      });
     }
 
     const now = new Date().toISOString();
@@ -816,6 +1062,20 @@ export function createMarketplaceRouter(db: DbInstance): Router {
 
     if (!isEmployer && !isPerformer && req.user!.activeRole !== 'admin') {
       return res.status(403).json({ error: 'Bu sözleşmeyi onaylama yetkiniz yok.' });
+    }
+
+    const conflictCheck = hasBookedPerformerConflict(
+      db,
+      bk.performer_id,
+      bk.event_date,
+      bk.start_time || '20:00',
+      bk.end_time || '21:30',
+      bk.id
+    );
+    if (conflictCheck.conflict) {
+      return res.status(409).json({
+        error: `Takvim çakışması: İcracının ${conflictCheck.label} için kesinleşmiş başka bir rezervasyonu olduğundan sözleşme onaylanamaz.`,
+      });
     }
 
     const now = new Date().toISOString();

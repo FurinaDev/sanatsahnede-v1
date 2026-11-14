@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { apiRequest } from '../services/api';
-import { Award, ShieldCheck, QrCode, Printer, Plus, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Award, ShieldCheck, QrCode, Printer, Plus, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 
 interface CareerPassportViewProps {
   artistId?: string;
@@ -70,6 +70,17 @@ export const CareerPassportView: React.FC<CareerPassportViewProps> = ({ artistId
       setFeedback({ type: 'success', text: 'Manuel sahne geçmişi kaydınız eklendi.' });
     } catch (err: any) {
       setFeedback({ type: 'error', text: err?.message || 'Kayıt eklenemedi.' });
+    }
+  };
+
+  const handleDeleteRecord = async (recordId: string) => {
+    setFeedback(null);
+    try {
+      await apiRequest(`/api/career-passport/${recordId}`, { method: 'DELETE' });
+      await refreshBootstrap();
+      setFeedback({ type: 'success', text: 'Manuel sahne geçmişi kaydı silindi.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'Kayıt silinemedi.' });
     }
   };
 
@@ -209,7 +220,22 @@ export const CareerPassportView: React.FC<CareerPassportViewProps> = ({ artistId
                     {rec.organizationName} · {rec.venueName} · Rol: {rec.roleTitle}
                   </div>
                 </div>
-                <div className="text-xs font-bold text-[#16274e] dark:text-blue-300 tabular-nums">{rec.eventDate}</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-xs font-bold text-[#16274e] dark:text-blue-300 tabular-nums">{rec.eventDate}</div>
+                  {isAuthenticated &&
+                    rec.sourceType === 'manual' &&
+                    !rec.isVerifiedRecord &&
+                    (rec.userId === currentUser.id || currentUser.activeRole === 'admin') && (
+                      <button
+                        type="button"
+                        aria-label={`Kaydı sil: ${rec.title}`}
+                        onClick={() => handleDeleteRecord(rec.id)}
+                        className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                </div>
               </div>
             ))}
           </div>

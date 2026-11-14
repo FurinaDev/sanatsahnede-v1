@@ -11,6 +11,7 @@ import {
 } from '../db/mappers';
 import { newId, slugify } from '../utils/crypto';
 import { logAudit } from '../services/auditService';
+import { notifyUser } from '../services/notificationService';
 
 export function createProfilesRouter(db: DbInstance): Router {
   const router = Router();
@@ -27,6 +28,7 @@ export function createProfilesRouter(db: DbInstance): Router {
 
     const {
       fullName,
+      stageName,
       title,
       discipline,
       specialtyTags,
@@ -40,6 +42,8 @@ export function createProfilesRouter(db: DbInstance): Router {
       education,
       experienceYears,
       repertoire,
+      avatarUrl,
+      coverUrl,
       website,
       socialLinks,
       educations,
@@ -50,6 +54,7 @@ export function createProfilesRouter(db: DbInstance): Router {
     db.prepare(`
       UPDATE individual_profiles SET
         full_name = COALESCE(?, full_name),
+        stage_name = COALESCE(?, stage_name),
         title = COALESCE(?, title),
         discipline = COALESCE(?, discipline),
         specialty_tags_json = COALESCE(?, specialty_tags_json),
@@ -63,6 +68,8 @@ export function createProfilesRouter(db: DbInstance): Router {
         education = COALESCE(?, education),
         experience_years = COALESCE(?, experience_years),
         repertoire_json = COALESCE(?, repertoire_json),
+        avatar_url = COALESCE(?, avatar_url),
+        cover_url = COALESCE(?, cover_url),
         website = COALESCE(?, website),
         social_links_json = COALESCE(?, social_links_json),
         educations_json = COALESCE(?, educations_json),
@@ -71,6 +78,7 @@ export function createProfilesRouter(db: DbInstance): Router {
       WHERE id = ? AND user_id = ?
     `).run(
       fullName ?? null,
+      stageName ?? null,
       title ?? null,
       discipline ?? null,
       specialtyTags ? JSON.stringify(specialtyTags) : null,
@@ -84,6 +92,8 @@ export function createProfilesRouter(db: DbInstance): Router {
       education ?? null,
       experienceYears !== undefined ? Number(experienceYears) : null,
       repertoire ? JSON.stringify(repertoire) : null,
+      avatarUrl ?? null,
+      coverUrl ?? null,
       website ?? null,
       socialLinks ? JSON.stringify(socialLinks) : null,
       educations ? JSON.stringify(educations) : null,
@@ -186,26 +196,44 @@ export function createProfilesRouter(db: DbInstance): Router {
       return res.status(403).json({ error: 'Bu topluluğu düzenleme yetkiniz yok.' });
     }
 
-    const { name, ensembleType, bio, city, genres, repertoire, website, discipline } = req.body || {};
+    const {
+      name,
+      ensembleType,
+      bio,
+      foundedYear,
+      city,
+      genres,
+      repertoire,
+      avatarUrl,
+      coverUrl,
+      website,
+      discipline,
+    } = req.body || {};
     db.prepare(`
       UPDATE ensembles SET
         name = COALESCE(?, name),
         ensemble_type = COALESCE(?, ensemble_type),
         bio = COALESCE(?, bio),
+        founded_year = COALESCE(?, founded_year),
         city = COALESCE(?, city),
         discipline = COALESCE(?, discipline),
         genres_json = COALESCE(?, genres_json),
         repertoire_json = COALESCE(?, repertoire_json),
+        avatar_url = COALESCE(?, avatar_url),
+        cover_url = COALESCE(?, cover_url),
         website = COALESCE(?, website)
       WHERE id = ?
     `).run(
       name ?? null,
       ensembleType ?? null,
       bio ?? null,
+      foundedYear !== undefined ? Number(foundedYear) : null,
       city ?? null,
       discipline ?? null,
       genres ? JSON.stringify(genres) : null,
       repertoire ? JSON.stringify(repertoire) : null,
+      avatarUrl ?? null,
+      coverUrl ?? null,
       website ?? null,
       ens.id
     );
@@ -214,7 +242,7 @@ export function createProfilesRouter(db: DbInstance): Router {
     return res.json({ ensemble: mapEnsemble(db, updated) });
   });
 
-  // Add ensemble member
+  // Add ensemble member (with email invite workflow if matching registered user)
   router.post('/ensembles/:id/members', requireAuth, (req: AuthedRequest, res) => {
     const ens = db.prepare('SELECT * FROM ensembles WHERE id = ?').get(req.params.id) as any;
     if (!ens) return res.status(404).json({ error: 'Topluluk bulunamadı.' });
@@ -227,24 +255,84 @@ export function createProfilesRouter(db: DbInstance): Router {
       return res.status(400).json({ error: 'Üye adı zorunludur.' });
     }
 
+    const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+    const linkedUser = normalizedEmail
+      ? (db.prepare('SELECT id, avatar_url FROM users WHERE email = ?').get(normalizedEmail) as any)
+      : null;
+    const shouldInvite = Boolean(linkedUser && linkedUser.id !== req.user!.id);
+    const memberStatus = shouldInvite ? 'invited' : 'active';
+
     const memberId = newId('mem');
     db.prepare(`
-      INSERT INTO ensemble_members (id, ensemble_id, email, name, instrument, role_title, joined_year, avatar_url, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ensemble_members (id, ensemble_id, user_id, email, name, instrument, role_title, joined_year, avatar_url, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       memberId,
       ens.id,
-      email || null,
+      linkedUser?.id || null,
+      normalizedEmail,
       String(name).trim(),
       instrument,
       roleTitle,
       new Date().getFullYear(),
-      '/src/assets/images/artist_cellist_portrait_1794582676514.jpg',
-      'active'
+      linkedUser?.avatar_url || '/src/assets/images/artist_cellist_portrait_1794582676514.jpg',
+      memberStatus
     );
+
+    if (shouldInvite && linkedUser) {
+      notifyUser(db, {
+        userId: linkedUser.id,
+        type: 'ensemble_invite',
+        title: `${ens.name} Topluluğundan Üyelik Daveti`,
+        body: `"${ens.name}" topluluğuna "${roleTitle}" (${instrument}) olarak davet edildiniz.`,
+        linkView: 'ensemble_dashboard',
+        linkEntityId: ens.id,
+      });
+    }
 
     const updated = db.prepare('SELECT * FROM ensembles WHERE id = ?').get(ens.id);
     return res.status(201).json({ ensemble: mapEnsemble(db, updated) });
+  });
+
+  // Respond to ensemble membership invitation
+  router.post('/ensembles/:id/members/:memberId/respond', requireAuth, (req: AuthedRequest, res) => {
+    const ens = db.prepare('SELECT * FROM ensembles WHERE id = ?').get(req.params.id) as any;
+    if (!ens) return res.status(404).json({ error: 'Topluluk bulunamadı.' });
+    const member = db
+      .prepare('SELECT * FROM ensemble_members WHERE id = ? AND ensemble_id = ?')
+      .get(req.params.memberId, ens.id) as any;
+    if (!member) return res.status(404).json({ error: 'Üyelik daveti bulunamadı.' });
+
+    const matchesUser =
+      member.user_id === req.user!.id ||
+      (member.email && member.email.toLowerCase() === req.user!.email.toLowerCase());
+    if (!matchesUser && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu davete yalnızca davet edilen kullanıcı yanıt verebilir.' });
+    }
+
+    const { decision } = req.body || {};
+    if (!['accept', 'decline'].includes(decision)) {
+      return res.status(400).json({ error: 'Geçersiz davet yanıtı.' });
+    }
+
+    const nextStatus = decision === 'accept' ? 'active' : 'declined';
+    db.prepare('UPDATE ensemble_members SET status = ?, user_id = COALESCE(user_id, ?) WHERE id = ?').run(
+      nextStatus,
+      req.user!.id,
+      member.id
+    );
+
+    notifyUser(db, {
+      userId: ens.leader_user_id,
+      type: 'ensemble_invite_response',
+      title: `Topluluk Daveti ${decision === 'accept' ? 'Kabul Edildi' : 'Reddedildi'}`,
+      body: `${member.name}, "${ens.name}" üyelik davetini ${decision === 'accept' ? 'kabul etti' : 'reddetti'}.`,
+      linkView: 'ensemble_dashboard',
+      linkEntityId: ens.id,
+    });
+
+    const updated = db.prepare('SELECT * FROM ensembles WHERE id = ?').get(ens.id);
+    return res.json({ ensemble: mapEnsemble(db, updated) });
   });
 
   // Remove ensemble member
@@ -323,6 +411,54 @@ export function createProfilesRouter(db: DbInstance): Router {
     return res.status(201).json({ portfolio: mapPortfolio(created) });
   });
 
+  router.patch('/artist-studio/:id', requireAuth, requireFeatureFlag(db, 'artist_studio'), (req: AuthedRequest, res) => {
+    const row = db.prepare('SELECT * FROM artist_portfolios WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'Portfolyo bulunamadı.' });
+    if (row.user_id !== req.user!.id && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu portfolyoyu düzenleme yetkiniz yok.' });
+    }
+
+    const {
+      title,
+      audienceType,
+      identityRole,
+      language,
+      visibility,
+      summary,
+      worksList,
+      pressQuotes,
+      awards,
+    } = req.body || {};
+
+    db.prepare(`
+      UPDATE artist_portfolios SET
+        title = COALESCE(?, title),
+        audience_type = COALESCE(?, audience_type),
+        identity_role = COALESCE(?, identity_role),
+        language = COALESCE(?, language),
+        visibility = COALESCE(?, visibility),
+        summary = COALESCE(?, summary),
+        works_list_json = COALESCE(?, works_list_json),
+        press_quotes_json = COALESCE(?, press_quotes_json),
+        awards_json = COALESCE(?, awards_json)
+      WHERE id = ?
+    `).run(
+      title !== undefined ? String(title).trim() : null,
+      audienceType ?? null,
+      identityRole ?? null,
+      language ?? null,
+      visibility ?? null,
+      summary ?? null,
+      worksList !== undefined ? JSON.stringify(Array.isArray(worksList) ? worksList : []) : null,
+      pressQuotes !== undefined ? JSON.stringify(Array.isArray(pressQuotes) ? pressQuotes : []) : null,
+      awards !== undefined ? JSON.stringify(Array.isArray(awards) ? awards : []) : null,
+      row.id
+    );
+
+    const updated = db.prepare('SELECT * FROM artist_portfolios WHERE id = ?').get(row.id);
+    return res.json({ portfolio: mapPortfolio(updated) });
+  });
+
   router.delete('/artist-studio/:id', requireAuth, (req: AuthedRequest, res) => {
     const row = db.prepare('SELECT * FROM artist_portfolios WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Portfolyo bulunamadı.' });
@@ -382,6 +518,19 @@ export function createProfilesRouter(db: DbInstance): Router {
 
     const created = db.prepare('SELECT * FROM career_records WHERE id = ?').get(id);
     return res.status(201).json({ record: mapCareerRecord(created) });
+  });
+
+  router.delete('/career-passport/:id', requireAuth, requireFeatureFlag(db, 'career_passport'), (req: AuthedRequest, res) => {
+    const row = db.prepare('SELECT * FROM career_records WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'Kariyer kaydı bulunamadı.' });
+    if (row.user_id !== req.user!.id && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu kariyer kaydını silme yetkiniz yok.' });
+    }
+    if (row.source_type !== 'manual' || Boolean(row.is_verified_record)) {
+      return res.status(403).json({ error: 'Doğrulanmış rezervasyon/sistem kayıtları silinemez.' });
+    }
+    db.prepare('DELETE FROM career_records WHERE id = ?').run(row.id);
+    return res.json({ success: true });
   });
 
   router.get('/career-passport/:artistId/qr', async (req, res) => {

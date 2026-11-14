@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Router, Response } from 'express';
+import { Router, Request, Response, CookieOptions } from 'express';
 import { DbInstance, parseJson } from '../db/database';
 import {
   AuthedRequest,
@@ -35,7 +35,28 @@ export function isDemoQuickLoginEnabled(): boolean {
   return process.env.ENABLE_DEMO_QUICK_LOGIN !== 'false';
 }
 
-function createSessionForUser(db: DbInstance, res: Response, userId: string): void {
+function isHttpsRequest(req: Request): boolean {
+  if (req.secure) return true;
+  const xfProto = req.headers['x-forwarded-proto'];
+  if (typeof xfProto === 'string' && xfProto.toLowerCase().includes('https')) return true;
+  return process.env.NODE_ENV === 'production';
+}
+
+function getSessionCookieOptions(req: Request, withMaxAge = true): CookieOptions {
+  const isHttps = isHttpsRequest(req);
+  const opts: CookieOptions = {
+    httpOnly: true,
+    sameSite: isHttps ? 'none' : 'lax',
+    secure: isHttps,
+    path: '/',
+  };
+  if (withMaxAge) {
+    opts.maxAge = 7 * 24 * 60 * 60 * 1000;
+  }
+  return opts;
+}
+
+function createSessionForUser(db: DbInstance, req: Request, res: Response, userId: string): string {
   const token = generateToken(32);
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const sessionId = newId('sess');
@@ -47,13 +68,8 @@ function createSessionForUser(db: DbInstance, res: Response, userId: string): vo
   `).run(sessionId, userId, tokenHash, expiresAt, new Date().toISOString());
 
   const signed = signValue(token, getSessionSecret());
-  res.cookie(SESSION_COOKIE_NAME, signed, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: '/',
-  });
+  res.cookie(SESSION_COOKIE_NAME, signed, getSessionCookieOptions(req, true));
+  return signed;
 }
 
 function ensureStarterWorkspaceForRole(
@@ -268,7 +284,7 @@ export function createAuthRouter(db: DbInstance): Router {
       { organizationName, city, instrument, businessType }
     );
 
-    createSessionForUser(db, res, userId);
+    const sessionToken = createSessionForUser(db, req, res, userId);
     logAudit(db, {
       userId,
       action: 'USER_REGISTER',
@@ -280,6 +296,7 @@ export function createAuthRouter(db: DbInstance): Router {
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     return res.status(201).json({
       user: rowToUser(userRow),
+      sessionToken,
       sandboxVerificationCodes:
         process.env.SMTP_HOST ? undefined : { emailCode, phoneCode, mode: 'sandbox' },
     });
@@ -302,7 +319,7 @@ export function createAuthRouter(db: DbInstance): Router {
       return res.status(403).json({ error: 'Hesabınız şu anda aktif değil.' });
     }
 
-    createSessionForUser(db, res, userRow.id);
+    const sessionToken = createSessionForUser(db, req, res, userRow.id);
     logAudit(db, {
       userId: userRow.id,
       action: 'USER_LOGIN',
@@ -310,7 +327,7 @@ export function createAuthRouter(db: DbInstance): Router {
       resourceId: userRow.id,
     });
 
-    return res.json({ user: rowToUser(userRow) });
+    return res.json({ user: rowToUser(userRow), sessionToken });
   });
 
   router.post('/demo-login', authRateLimiter, (req, res) => {
@@ -331,7 +348,7 @@ export function createAuthRouter(db: DbInstance): Router {
       return res.status(404).json({ error: 'Demo hesabı bulunamadı.' });
     }
 
-    createSessionForUser(db, res, userRow.id);
+    const sessionToken = createSessionForUser(db, req, res, userRow.id);
     logAudit(db, {
       userId: userRow.id,
       action: 'DEMO_QUICK_LOGIN',
@@ -340,14 +357,14 @@ export function createAuthRouter(db: DbInstance): Router {
       details: { sandbox: true },
     });
 
-    return res.json({ user: rowToUser(userRow), sandboxDemo: true });
+    return res.json({ user: rowToUser(userRow), sessionToken, sandboxDemo: true });
   });
 
   router.post('/logout', (req: AuthedRequest, res) => {
     if (req.sessionId) {
       db.prepare('DELETE FROM sessions WHERE id = ?').run(req.sessionId);
     }
-    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    res.clearCookie(SESSION_COOKIE_NAME, getSessionCookieOptions(req, false));
     return res.json({ success: true });
   });
 

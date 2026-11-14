@@ -10,6 +10,7 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
+  Pencil,
 } from 'lucide-react';
 
 export const ArtistStudioView: React.FC = () => {
@@ -33,8 +34,40 @@ export const ArtistStudioView: React.FC = () => {
     pressText: '"Güçlü yay tekniği ve derinlikli müzikal yorum." — İstanbul Kültür Sanat Bülteni',
     awardsText: '2025 Genç Solistler Ödülü',
   });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [qrMap, setQrMap] = useState<Record<string, { targetUrl: string; qrDataUrl: string }>>({});
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({
+      title: '',
+      audienceType: 'Kurum & Otel',
+      identityRole: 'Solist & Oda Müziği Sanatçısı',
+      language: 'tr',
+      visibility: 'public',
+      summary: '',
+      worksText: 'Bach Çello Süitleri No.1-3, Saygun Partita Op.31',
+      pressText: '"Güçlü yay tekniği ve derinlikli müzikal yorum." — İstanbul Kültür Sanat Bülteni',
+      awardsText: '2025 Genç Solistler Ödülü',
+    });
+  };
+
+  const handleStartEdit = (port: typeof portfolios[number]) => {
+    setEditingId(port.id);
+    setForm({
+      title: port.title,
+      audienceType: port.audienceType,
+      identityRole: port.identityRole,
+      language: port.language === 'en' ? 'en' : 'tr',
+      visibility: port.visibility,
+      summary: port.summary,
+      worksText: port.worksList.join(', '),
+      pressText: port.pressQuotes.join('\n'),
+      awardsText: port.awards.join(', '),
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleAiBio = async () => {
     const res = await generateAiDraft('press_bio', {
@@ -48,7 +81,7 @@ export const ArtistStudioView: React.FC = () => {
     }
   };
 
-  const handleCreatePortfolio = async (e: React.FormEvent) => {
+  const handleSubmitPortfolio = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAuthenticated) {
       setAuthModalMode('login');
@@ -56,25 +89,30 @@ export const ArtistStudioView: React.FC = () => {
     }
     setFeedback(null);
     try {
-      await apiRequest('/api/artist-studio', {
-        method: 'POST',
-        body: {
-          title: form.title,
-          audienceType: form.audienceType,
-          identityRole: form.identityRole,
-          language: form.language,
-          visibility: form.visibility,
-          summary: form.summary,
-          worksList: form.worksText.split(',').map((s) => s.trim()).filter(Boolean),
-          pressQuotes: form.pressText.split('\n').map((s) => s.trim()).filter(Boolean),
-          awards: form.awardsText.split(',').map((s) => s.trim()).filter(Boolean),
-        },
-      });
-      await refreshBootstrap();
-      setForm((p) => ({ ...p, title: '', summary: '' }));
-      setFeedback({ type: 'success', text: 'Yeni çoklu kimlik portfolyo / EPK sürümü oluşturuldu.' });
+      const body = {
+        title: form.title,
+        audienceType: form.audienceType,
+        identityRole: form.identityRole,
+        language: form.language,
+        visibility: form.visibility,
+        summary: form.summary,
+        worksList: form.worksText.split(',').map((s) => s.trim()).filter(Boolean),
+        pressQuotes: form.pressText.split('\n').map((s) => s.trim()).filter(Boolean),
+        awards: form.awardsText.split(',').map((s) => s.trim()).filter(Boolean),
+      };
+      if (editingId) {
+        await apiRequest(`/api/artist-studio/${editingId}`, { method: 'PATCH', body });
+        await refreshBootstrap();
+        resetForm();
+        setFeedback({ type: 'success', text: 'Portfolyo / EPK sürümü güncellendi.' });
+      } else {
+        await apiRequest('/api/artist-studio', { method: 'POST', body });
+        await refreshBootstrap();
+        resetForm();
+        setFeedback({ type: 'success', text: 'Yeni çoklu kimlik portfolyo / EPK sürümü oluşturuldu.' });
+      }
     } catch (err: any) {
-      setFeedback({ type: 'error', text: err?.message || 'Portfolyo oluşturulamadı.' });
+      setFeedback({ type: 'error', text: err?.message || 'Portfolyo kaydedilemedi.' });
     }
   };
 
@@ -135,12 +173,12 @@ export const ArtistStudioView: React.FC = () => {
         </div>
       )}
 
-      {/* Create Form */}
-      <form onSubmit={handleCreatePortfolio} className="bg-white dark:bg-[#13213e] rounded-2xl border border-slate-200 dark:border-[#1e335a] p-6 space-y-4">
+      {/* Create / Edit Form */}
+      <form onSubmit={handleSubmitPortfolio} className="bg-white dark:bg-[#13213e] rounded-2xl border border-slate-200 dark:border-[#1e335a] p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-bold text-base text-[#16274e] dark:text-white flex items-center gap-2">
-            <Plus className="w-4 h-4 text-[#E45424]" />
-            <span>Yeni Portfolyo / Basın Kiti Sürümü</span>
+            {editingId ? <Pencil className="w-4 h-4 text-[#E45424]" /> : <Plus className="w-4 h-4 text-[#E45424]" />}
+            <span>{editingId ? 'Portfolyo / Basın Kiti Sürümünü Düzenle' : 'Yeni Portfolyo / Basın Kiti Sürümü'}</span>
           </h2>
           <button
             type="button"
@@ -184,9 +222,14 @@ export const ArtistStudioView: React.FC = () => {
           <textarea id="epk-summary" rows={3} required value={form.summary} onChange={(e) => setForm((p) => ({ ...p, summary: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {editingId && (
+            <button type="button" onClick={resetForm} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer">
+              Düzenlemeyi İptal Et
+            </button>
+          )}
           <button type="submit" className="px-5 py-2.5 rounded-xl bg-[#E45424] hover:bg-[#c94317] text-white text-xs font-bold cursor-pointer">
-            Portfolyo Sürümünü Kaydet
+            {editingId ? 'Değişiklikleri Güncelle' : 'Portfolyo Sürümünü Kaydet'}
           </button>
         </div>
       </form>
@@ -238,14 +281,24 @@ export const ArtistStudioView: React.FC = () => {
                 </button>
 
                 {isOwner && (
-                  <button
-                    type="button"
-                    aria-label={`Portfolyoyu sil: ${port.title}`}
-                    onClick={() => handleDeletePortfolio(port.id)}
-                    className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={`Portfolyoyu düzenle: ${port.title}`}
+                      onClick={() => handleStartEdit(port)}
+                      className="p-2 rounded-xl text-[#16274e] dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Portfolyoyu sil: ${port.title}`}
+                      onClick={() => handleDeletePortfolio(port.id)}
+                      className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
               </div>
             </article>

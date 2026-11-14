@@ -19,10 +19,26 @@ export const CultureDeskView: React.FC = () => {
     organizations,
     organizationMembers,
     culturalPrograms,
+    currentUser,
     isAuthenticated,
     setAuthModalMode,
     refreshBootstrap,
   } = useApp();
+
+  const canManageOrg = (orgId: string) => {
+    if (!isAuthenticated) return false;
+    if (currentUser.activeRole === 'admin') return true;
+    const org = organizations.find((o) => o.id === orgId);
+    if (org?.ownerUserId === currentUser.id) return true;
+    return organizationMembers.some(
+      (m) =>
+        m.organizationId === orgId &&
+        m.status === 'active' &&
+        (m.userId === currentUser.id || (m.email && m.email.toLowerCase() === currentUser.email.toLowerCase()))
+    );
+  };
+
+  const managedOrganizations = organizations.filter((o) => canManageOrg(o.id));
 
   const [orgForm, setOrgForm] = useState({
     name: '',
@@ -65,9 +81,9 @@ export const CultureDeskView: React.FC = () => {
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    const orgId = memberForm.organizationId || organizations[0]?.id;
+    const orgId = memberForm.organizationId || managedOrganizations[0]?.id;
     if (!orgId) {
-      setFeedback({ type: 'error', text: 'Önce bir kurum seçin veya oluşturun.' });
+      setFeedback({ type: 'error', text: 'Yetkili olduğunuz bir kurum seçin veya yeni bir kurum oluşturun.' });
       return;
     }
     setFeedback(null);
@@ -91,9 +107,9 @@ export const CultureDeskView: React.FC = () => {
 
   const handleCreateProgram = async (e: React.FormEvent) => {
     e.preventDefault();
-    const orgId = progForm.organizationId || organizations[0]?.id;
+    const orgId = progForm.organizationId || managedOrganizations[0]?.id;
     if (!orgId) {
-      setFeedback({ type: 'error', text: 'Program açmak için bir kurum seçin veya oluşturun.' });
+      setFeedback({ type: 'error', text: 'Program açmak için yetkili olduğunuz bir kurum seçin veya oluşturun.' });
       return;
     }
     setFeedback(null);
@@ -216,21 +232,27 @@ export const CultureDeskView: React.FC = () => {
               <Users className="w-4 h-4 text-[#E45424]" />
               <span>Kurum Yetkilisi Davet Et</span>
             </h2>
-            <select
-              aria-label="Hedef Kurum"
-              value={memberForm.organizationId || organizations[0]?.id || ''}
-              onChange={(e) => setMemberForm((p) => ({ ...p, organizationId: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
-            >
-              {organizations.map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-            <input required aria-label="Yetkili Adı" value={memberForm.userName} onChange={(e) => setMemberForm((p) => ({ ...p, userName: e.target.value }))} placeholder="Ad Soyad" className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
-            <input required type="email" aria-label="Yetkili E-posta" value={memberForm.email} onChange={(e) => setMemberForm((p) => ({ ...p, email: e.target.value }))} placeholder="yetkili@kurum.com" className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
-            <button type="submit" className="w-full py-2 rounded-xl bg-[#16274e] text-white text-xs font-bold cursor-pointer">
-              Yetkili Ekle
-            </button>
+            {managedOrganizations.length === 0 ? (
+              <p className="text-xs text-slate-500">Yetkili davet etmek için önce kendi kurum/şube yapınızı oluşturun.</p>
+            ) : (
+              <>
+                <select
+                  aria-label="Hedef Kurum"
+                  value={memberForm.organizationId || managedOrganizations[0]?.id || ''}
+                  onChange={(e) => setMemberForm((p) => ({ ...p, organizationId: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
+                >
+                  {managedOrganizations.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </select>
+                <input required aria-label="Yetkili Adı" value={memberForm.userName} onChange={(e) => setMemberForm((p) => ({ ...p, userName: e.target.value }))} placeholder="Ad Soyad" className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
+                <input required type="email" aria-label="Yetkili E-posta" value={memberForm.email} onChange={(e) => setMemberForm((p) => ({ ...p, email: e.target.value }))} placeholder="yetkili@kurum.com" className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
+                <button type="submit" className="w-full py-2 rounded-xl bg-[#16274e] text-white text-xs font-bold cursor-pointer">
+                  Yetkili Ekle
+                </button>
+              </>
+            )}
           </form>
 
           {/* Create Program */}
@@ -239,29 +261,35 @@ export const CultureDeskView: React.FC = () => {
               <CalendarDays className="w-4 h-4 text-[#E45424]" />
               <span>Yıllık Kültür Programı Aç</span>
             </h2>
-            <select
-              aria-label="Program Kurumu"
-              value={progForm.organizationId || organizations[0]?.id || ''}
-              onChange={(e) => setProgForm((p) => ({ ...p, organizationId: e.target.value }))}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
-            >
-              {organizations.map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-            <input required aria-label="Program Adı" value={progForm.title} onChange={(e) => setProgForm((p) => ({ ...p, title: e.target.value }))} placeholder="2027 Kültür Sanat Sezonu" className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
-            <select
-              aria-label="Yönetim Modeli"
-              value={progForm.serviceMode}
-              onChange={(e) => setProgForm((p) => ({ ...p, serviceMode: e.target.value as any }))}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
-            >
-              <option value="self_service">Self-Service (Kendi Yönetimim)</option>
-              <option value="managed_service">Profesyonel Yönetim (Managed Service)</option>
-            </select>
-            <button type="submit" className="w-full py-2 rounded-xl bg-[#E45424] text-white text-xs font-bold cursor-pointer">
-              Programı Başlat
-            </button>
+            {managedOrganizations.length === 0 ? (
+              <p className="text-xs text-slate-500">Yıllık kültür programı başlatmak için yönettiğiniz bir kurum bulunmalıdır.</p>
+            ) : (
+              <>
+                <select
+                  aria-label="Program Kurumu"
+                  value={progForm.organizationId || managedOrganizations[0]?.id || ''}
+                  onChange={(e) => setProgForm((p) => ({ ...p, organizationId: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
+                >
+                  {managedOrganizations.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </select>
+                <input required aria-label="Program Adı" value={progForm.title} onChange={(e) => setProgForm((p) => ({ ...p, title: e.target.value }))} placeholder="2027 Kültür Sanat Sezonu" className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs" />
+                <select
+                  aria-label="Yönetim Modeli"
+                  value={progForm.serviceMode}
+                  onChange={(e) => setProgForm((p) => ({ ...p, serviceMode: e.target.value as any }))}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
+                >
+                  <option value="self_service">Self-Service (Kendi Yönetimim)</option>
+                  <option value="managed_service">Profesyonel Yönetim (Managed Service)</option>
+                </select>
+                <button type="submit" className="w-full py-2 rounded-xl bg-[#E45424] text-white text-xs font-bold cursor-pointer">
+                  Programı Başlat
+                </button>
+              </>
+            )}
           </form>
         </div>
       )}
@@ -316,7 +344,7 @@ export const CultureDeskView: React.FC = () => {
                   </div>
                 </div>
 
-                {isAuthenticated && (
+                {canManageOrg(prog.organizationId) && (
                   <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800">
                     <button
                       type="button"
@@ -362,7 +390,7 @@ export const CultureDeskView: React.FC = () => {
                 ))}
               </div>
 
-              {isAuthenticated && (
+              {canManageOrg(prog.organizationId) && (
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <input
                     aria-label={`Ay (${prog.title})`}

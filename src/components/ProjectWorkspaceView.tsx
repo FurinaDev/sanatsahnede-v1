@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { apiRequest } from '../services/api';
 import { formatCurrencyTRY } from '../utils/businessLogic';
@@ -41,6 +41,10 @@ export const ProjectWorkspaceView: React.FC<ProjectWorkspaceViewProps> = ({ proj
   const [newFileUrl, setNewFileUrl] = useState('');
   const [rightsDraft, setRightsDraft] = useState(project?.rightsAgreement || '');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    setRightsDraft(project?.rightsAgreement || '');
+  }, [project?.id, project?.rightsAgreement]);
 
   if (!project) {
     return (

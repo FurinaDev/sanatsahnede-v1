@@ -56,17 +56,33 @@ export function createProductionRouter(db: DbInstance): Router {
     if (!ws) {
       const id = newId('prod');
       const now = new Date().toISOString();
+      const bkRow =
+        contextType === 'booking'
+          ? (db.prepare('SELECT listing_title, event_date, venue_name FROM bookings WHERE id = ?').get(contextId) as any)
+          : null;
+      const projRow =
+        contextType !== 'booking'
+          ? (db.prepare('SELECT title, delivery_date, city FROM projects WHERE id = ?').get(contextId) as any)
+          : null;
       const title =
         contextType === 'booking'
-          ? ((db.prepare('SELECT listing_title FROM bookings WHERE id = ?').get(contextId) as any)?.listing_title || 'Sahne Prodüksiyon Masası')
-          : ((db.prepare('SELECT title FROM projects WHERE id = ?').get(contextId) as any)?.title || 'Proje Prodüksiyon Masası');
+          ? (bkRow?.listing_title || 'Sahne Prodüksiyon Masası')
+          : (projRow?.title || 'Proje Prodüksiyon Masası');
+      const resolvedDate =
+        contextType === 'booking'
+          ? (bkRow?.event_date || now.slice(0, 10))
+          : (projRow?.delivery_date || now.slice(0, 10));
+      const resolvedVenue =
+        contextType === 'booking'
+          ? (bkRow?.venue_name || 'Belirlenen Sahne')
+          : (projRow?.city ? `${projRow.city} (Proje Alanı)` : 'Proje Alanı');
       db.prepare(`
         INSERT INTO production_workspaces (
           id, context_type, context_id, title, event_date, venue_name,
           rider_json, stage_plot_json, schedule_json, tasks_json, logistics_json, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id, contextType, contextId, title, '2026-12-01', 'Belirlenen Sahne',
+        id, contextType, contextId, title, resolvedDate, resolvedVenue,
         JSON.stringify({ stageSize: '6m x 4m', soundRequirements: '', lightRequirements: '', microphones: [], backline: [], monitors: '', ioPatchList: '', specialNotes: '' }),
         JSON.stringify([]), JSON.stringify([]), JSON.stringify([]),
         JSON.stringify({ travelSummary: '', accommodationSummary: '', transferNotes: '', arrivalTime: '' }),
@@ -117,7 +133,36 @@ export function createProductionRouter(db: DbInstance): Router {
     return res.json({ workspace: mapProductionWorkspace(updated) });
   });
 
-  // 9.4 Technical Match — Provider Inventory & Packages
+  // 9.4 Technical Match — Provider Profile, Inventory & Packages
+  router.patch('/technical-providers/me', requireAuth, requireFeatureFlag(db, 'technical_match'), (req: AuthedRequest, res) => {
+    const tp = db.prepare('SELECT * FROM technical_providers WHERE user_id = ?').get(req.user!.id) as any;
+    if (!tp) return res.status(404).json({ error: 'Teknik hizmet sağlayıcı profili bulunamadı.' });
+
+    const { name, city, serviceAreas, categories, description, staffCapacity } = req.body || {};
+    db.prepare(`
+      UPDATE technical_providers SET
+        name = COALESCE(?, name),
+        city = COALESCE(?, city),
+        service_areas_json = COALESCE(?, service_areas_json),
+        categories_json = COALESCE(?, categories_json),
+        description = COALESCE(?, description),
+        staff_capacity = COALESCE(?, staff_capacity)
+      WHERE id = ? AND user_id = ?
+    `).run(
+      name !== undefined ? String(name).trim() : null,
+      city ?? null,
+      serviceAreas !== undefined ? JSON.stringify(Array.isArray(serviceAreas) ? serviceAreas : []) : null,
+      categories !== undefined ? JSON.stringify(Array.isArray(categories) ? categories : []) : null,
+      description ?? null,
+      staffCapacity !== undefined ? Number(staffCapacity) : null,
+      tp.id,
+      req.user!.id
+    );
+
+    const updated = db.prepare('SELECT * FROM technical_providers WHERE id = ?').get(tp.id);
+    return res.json({ provider: mapTechnicalProvider(db, updated) });
+  });
+
   router.post('/technical-providers/equipment', requireAuth, requireFeatureFlag(db, 'technical_match'), (req: AuthedRequest, res) => {
     const tp = db.prepare('SELECT * FROM technical_providers WHERE user_id = ?').get(req.user!.id) as any;
     if (!tp) return res.status(403).json({ error: 'Ekipman eklemek için teknik hizmet sağlayıcı profiliniz olmalıdır.' });
@@ -164,6 +209,14 @@ export function createProductionRouter(db: DbInstance): Router {
 
     const updated = db.prepare('SELECT * FROM technical_providers WHERE id = ?').get(tp.id);
     return res.status(201).json({ provider: mapTechnicalProvider(db, updated) });
+  });
+
+  router.delete('/technical-providers/packages/:id', requireAuth, (req: AuthedRequest, res) => {
+    const tp = db.prepare('SELECT * FROM technical_providers WHERE user_id = ?').get(req.user!.id) as any;
+    if (!tp) return res.status(403).json({ error: 'Yetkisiz işlem.' });
+    db.prepare('DELETE FROM service_packages WHERE id = ? AND provider_id = ?').run(req.params.id, tp.id);
+    const updated = db.prepare('SELECT * FROM technical_providers WHERE id = ?').get(tp.id);
+    return res.json({ provider: mapTechnicalProvider(db, updated) });
   });
 
   // Rider-to-Inventory Match & Requests/Quotes
@@ -299,6 +352,35 @@ export function createProductionRouter(db: DbInstance): Router {
         type: 'technical_quote_accepted',
         title: 'Teknik Teklifiniz Onaylandı',
         body: `"${reqRow.title}" için sunduğunuz ${quote.amount} TRY teklif kabul edildi.`,
+        linkView: 'technical_dashboard',
+      });
+    }
+
+    const updatedQuote = db.prepare('SELECT * FROM technical_quotes WHERE id = ?').get(quote.id);
+    const updatedReq = db.prepare('SELECT * FROM technical_requests WHERE id = ?').get(reqRow.id);
+    return res.json({ quote: mapTechnicalQuote(updatedQuote), request: mapTechnicalRequest(updatedReq) });
+  });
+
+  router.post('/technical-quotes/:id/reject', requireAuth, (req: AuthedRequest, res) => {
+    const quote = db.prepare('SELECT * FROM technical_quotes WHERE id = ?').get(req.params.id) as any;
+    if (!quote) return res.status(404).json({ error: 'Teklif bulunamadı.' });
+
+    const reqRow = db.prepare('SELECT * FROM technical_requests WHERE id = ?').get(quote.request_id) as any;
+    if (!reqRow || (reqRow.requester_user_id !== req.user!.id && req.user!.activeRole !== 'admin')) {
+      return res.status(403).json({ error: 'Bu teklifi yalnızca talep sahibi reddedebilir.' });
+    }
+    if (quote.status === 'accepted') {
+      return res.status(400).json({ error: 'Kabul edilmiş teklif reddedilemez.' });
+    }
+
+    db.prepare(`UPDATE technical_quotes SET status = 'rejected' WHERE id = ?`).run(quote.id);
+    const tp = db.prepare('SELECT * FROM technical_providers WHERE id = ?').get(quote.provider_id) as any;
+    if (tp) {
+      notifyUser(db, {
+        userId: tp.user_id,
+        type: 'technical_quote_rejected',
+        title: 'Teknik Teklif Güncellemesi',
+        body: `"${reqRow.title}" için sunduğunuz ${quote.amount} TRY teklif reddedildi.`,
         linkView: 'technical_dashboard',
       });
     }

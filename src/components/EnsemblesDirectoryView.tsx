@@ -512,7 +512,7 @@ export const EnsemblesDirectoryView: React.FC = () => {
       </div>
 
       {/* Main Architectural Grid Workspace */}
-      <div className="architectural-grid bg-[#f8fafc] dark:bg-[#0c1527] min-h-[60vh] transition-colors">
+      <div className="bg-[#f8fafc] dark:bg-[#0c1527] min-h-[60vh] transition-colors">
         <div className="relative z-10 max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col lg:flex-row gap-6 items-start">
           {/* Left Sticky Sidebar */}
           <aside className="hidden lg:block w-72 xl:w-80 shrink-0 bg-white dark:bg-[#13213e] rounded-2xl border border-[#e2e8f0] dark:border-[#1e335a] p-5 sticky top-24 shadow-xs">

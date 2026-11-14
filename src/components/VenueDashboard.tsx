@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { apiRequest } from '../services/api';
 import { VenueAccessibility } from '../types';
-import { Building2, Plus, Accessibility, CalendarDays, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import { Building2, Plus, Accessibility, CalendarDays, CheckCircle2, AlertCircle, Trash2, Pencil } from 'lucide-react';
 
 const ACCESS_FIELDS: Array<{ key: keyof Omit<VenueAccessibility, 'accessibleTransitInfo' | 'verifiedBy' | 'verifiedAt'>; label: string }> = [
   { key: 'wheelchairAccess', label: 'Tekerlekli Sandalye Erişimi' },
@@ -57,6 +57,16 @@ export const VenueDashboard: React.FC = () => {
     feeAmount: 0,
     notes: '',
   });
+  const [editingVenueId, setEditingVenueId] = useState<string | null>(null);
+  const [venueEditForm, setVenueEditForm] = useState({
+    name: '',
+    city: '',
+    district: '',
+    address: '',
+    description: '',
+    contactPhone: '',
+  });
+  const [spaceForms, setSpaceForms] = useState<Record<string, { name: string; seatedCapacity: number; standingCapacity: number; stageDimensions: string }>>({});
 
   const myVenues = useMemo(
     () => venues.filter((v) => v.managerUserId === currentUser.id || currentUser.activeRole === 'admin'),
@@ -184,6 +194,59 @@ export const VenueDashboard: React.FC = () => {
       await refreshBootstrap();
     } catch (err: any) {
       setFeedback({ type: 'error', text: err?.message || 'Silinemedi.' });
+    }
+  };
+
+  const handleStartEditVenue = (venue: typeof myVenues[number]) => {
+    setEditingVenueId(venue.id);
+    setVenueEditForm({
+      name: venue.name,
+      city: venue.city,
+      district: venue.district || '',
+      address: venue.address || '',
+      description: venue.description || '',
+      contactPhone: venue.contactPhone || '',
+    });
+  };
+
+  const handleSaveVenueEdit = async (e: React.FormEvent, venueId: string) => {
+    e.preventDefault();
+    setFeedback(null);
+    try {
+      await apiRequest(`/api/venues/${venueId}`, { method: 'PATCH', body: venueEditForm });
+      await refreshBootstrap();
+      setEditingVenueId(null);
+      setFeedback({ type: 'success', text: 'Mekân bilgileri güncellendi.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'Mekân güncellenemedi.' });
+    }
+  };
+
+  const handleAddSpace = async (venueId: string) => {
+    const draft = spaceForms[venueId] || { name: '', seatedCapacity: 100, standingCapacity: 200, stageDimensions: '6m x 4m' };
+    if (!draft.name.trim()) {
+      setFeedback({ type: 'error', text: 'Salon adı zorunludur.' });
+      return;
+    }
+    setFeedback(null);
+    try {
+      await apiRequest(`/api/venues/${venueId}/spaces`, { method: 'POST', body: draft });
+      await refreshBootstrap();
+      setSpaceForms((p) => ({ ...p, [venueId]: { name: '', seatedCapacity: 100, standingCapacity: 200, stageDimensions: '6m x 4m' } }));
+      setFeedback({ type: 'success', text: 'Yeni salon mekâna eklendi.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'Salon eklenemedi.' });
+    }
+  };
+
+  const handleDeleteSpace = async (venueId: string, spaceId: string) => {
+    setFeedback(null);
+    try {
+      await apiRequest(`/api/venues/${venueId}/spaces/${spaceId}`, { method: 'DELETE' });
+      await refreshBootstrap();
+      setFeedback({ type: 'success', text: 'Salon kaydı silindi.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'Salon silinemedi.' });
     }
   };
 
@@ -436,6 +499,7 @@ export const VenueDashboard: React.FC = () => {
         </h2>
         {myVenues.map((venue) => {
           const venueSlots = availabilitySlots.filter((s) => s.ownerType === 'venue' && s.ownerId === venue.id);
+          const spaceDraft = spaceForms[venue.id] || { name: '', seatedCapacity: 100, standingCapacity: 200, stageDimensions: '6m x 4m' };
           return (
             <div key={venue.id} className="bg-white dark:bg-[#13213e] rounded-2xl border border-slate-200 dark:border-[#1e335a] p-6 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -443,9 +507,125 @@ export const VenueDashboard: React.FC = () => {
                   <h3 className="font-bold text-lg text-slate-900 dark:text-white">{venue.name}</h3>
                   <p className="text-xs text-slate-500">{venue.city}, {venue.district}</p>
                 </div>
-                <span className="text-xs font-semibold text-[#E45424]">
-                  {venue.accessibility.verifiedAt ? `Doğrulandı: ${venue.accessibility.verifiedBy}` : 'Doğrulama Uzmanı Onayı Bekliyor'}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => (editingVenueId === venue.id ? setEditingVenueId(null) : handleStartEditVenue(venue))}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold hover:border-[#E45424] cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-[#E45424]" />
+                    <span>{editingVenueId === venue.id ? 'Düzenlemeyi Kapat' : 'Mekânı Düzenle'}</span>
+                  </button>
+                  <span className="text-xs font-semibold text-[#E45424]">
+                    {venue.accessibility.verifiedAt ? `Doğrulandı: ${venue.accessibility.verifiedBy}` : 'Doğrulama Uzmanı Onayı Bekliyor'}
+                  </span>
+                </div>
+              </div>
+
+              {editingVenueId === venue.id && (
+                <form onSubmit={(e) => handleSaveVenueEdit(e, venue.id)} className="p-4 rounded-xl bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <input
+                      required
+                      aria-label="Mekân Adı Düzenle"
+                      value={venueEditForm.name}
+                      onChange={(e) => setVenueEditForm((p) => ({ ...p, name: e.target.value }))}
+                      placeholder="Mekân Adı"
+                      className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#13213e] text-xs"
+                    />
+                    <input
+                      required
+                      aria-label="Şehir Düzenle"
+                      value={venueEditForm.city}
+                      onChange={(e) => setVenueEditForm((p) => ({ ...p, city: e.target.value }))}
+                      placeholder="Şehir"
+                      className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#13213e] text-xs"
+                    />
+                    <input
+                      aria-label="İlçe Düzenle"
+                      value={venueEditForm.district}
+                      onChange={(e) => setVenueEditForm((p) => ({ ...p, district: e.target.value }))}
+                      placeholder="İlçe"
+                      className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#13213e] text-xs"
+                    />
+                  </div>
+                  <input
+                    aria-label="Adres Düzenle"
+                    value={venueEditForm.address}
+                    onChange={(e) => setVenueEditForm((p) => ({ ...p, address: e.target.value }))}
+                    placeholder="Açık Adres"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#13213e] text-xs"
+                  />
+                  <textarea
+                    rows={2}
+                    aria-label="Tanıtım Düzenle"
+                    value={venueEditForm.description}
+                    onChange={(e) => setVenueEditForm((p) => ({ ...p, description: e.target.value }))}
+                    placeholder="Mekân akustiği ve sahne detayları..."
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#13213e] text-xs"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setEditingVenueId(null)} className="px-3 py-1.5 text-xs font-semibold cursor-pointer">İptal</button>
+                    <button type="submit" className="px-4 py-1.5 rounded-lg bg-[#E45424] text-white text-xs font-bold cursor-pointer">Değişiklikleri Kaydet</button>
+                  </div>
+                </form>
+              )}
+
+              {/* Venue Spaces Management */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Salonlar &amp; Sahneler ({venue.spaces.length})</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {venue.spaces.map((sp) => (
+                    <div key={sp.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 text-xs">
+                      <div>
+                        <div className="font-bold">{sp.name}</div>
+                        <div className="text-[11px] text-slate-500">
+                          Oturma: {sp.seatedCapacity} · Ayakta: {sp.standingCapacity} {sp.stageDimensions ? `· ${sp.stageDimensions}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Salonu sil: ${sp.name}`}
+                        onClick={() => handleDeleteSpace(venue.id, sp.id)}
+                        className="p-1 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <input
+                    aria-label={`Yeni salon adı (${venue.name})`}
+                    value={spaceDraft.name}
+                    onChange={(e) => setSpaceForms((p) => ({ ...p, [venue.id]: { ...spaceDraft, name: e.target.value } }))}
+                    placeholder="Yeni salon adı"
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
+                  />
+                  <input
+                    aria-label={`Oturma kapasitesi (${venue.name})`}
+                    type="number"
+                    value={spaceDraft.seatedCapacity}
+                    onChange={(e) => setSpaceForms((p) => ({ ...p, [venue.id]: { ...spaceDraft, seatedCapacity: Number(e.target.value) } }))}
+                    placeholder="Oturma"
+                    className="w-24 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
+                  />
+                  <input
+                    aria-label={`Sahne ölçüsü (${venue.name})`}
+                    value={spaceDraft.stageDimensions}
+                    onChange={(e) => setSpaceForms((p) => ({ ...p, [venue.id]: { ...spaceDraft, stageDimensions: e.target.value } }))}
+                    placeholder="6m x 4m"
+                    className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddSpace(venue.id)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#16274e] text-white text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Salon Ekle</span>
+                  </button>
+                </div>
               </div>
 
               <div>

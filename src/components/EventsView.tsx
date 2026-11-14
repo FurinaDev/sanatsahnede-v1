@@ -27,6 +27,8 @@ import {
   Music,
   Ticket,
   Accessibility,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 
 const CATEGORIES: (EventCategory | 'Tümü')[] = [
@@ -59,6 +61,10 @@ export const EventsView: React.FC = () => {
   const {
     events,
     addEventAnnouncement,
+    updateEventAnnouncement,
+    deleteEventAnnouncement,
+    currentUser,
+    activeRole,
     isAuthenticated,
     setAuthModalMode,
     runtimeConfig,
@@ -67,6 +73,9 @@ export const EventsView: React.FC = () => {
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+  const [listFeedback, setListFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [selectedDiscipline, setSelectedDiscipline] = useState<ArtDiscipline | 'Tümü'>('Tümü');
   const [selectedGenre, setSelectedGenre] = useState<string>('Tümü');
   const [selectedCategory, setSelectedCategory] = useState<EventCategory | 'Tümü'>('Tümü');
@@ -184,12 +193,54 @@ export const EventsView: React.FC = () => {
     return chips;
   }, [searchQuery, selectedDiscipline, selectedGenre, selectedCategory, selectedCity, pricingFilter, accessibleOnly]);
 
+  const canManageEvent = (evt: EventAnnouncement) =>
+    isAuthenticated && (evt.creatorUserId === currentUser.id || ['admin', 'moderator'].includes(activeRole));
+
   const handleOpenCreateTab = () => {
     if (!isAuthenticated) {
       setAuthModalMode('login');
       return;
     }
+    setEditingEventId(null);
+    setSubmitFeedback(null);
     setActiveTab('create');
+  };
+
+  const handleStartEditEvent = (evt: EventAnnouncement) => {
+    setEditingEventId(evt.id);
+    setSubmitFeedback(null);
+    setFormData({
+      title: evt.title,
+      discipline: (evt.discipline || 'Müzik') as ArtDiscipline,
+      category: evt.category,
+      organizerName: evt.organizerName,
+      organizerContact: evt.organizerContact || '',
+      venueName: evt.venueName,
+      city: evt.city,
+      district: evt.district || '',
+      eventDate: evt.eventDate,
+      startTime: evt.startTime || '20:00',
+      endTime: evt.endTime || '21:30',
+      genres: evt.genres || ['Klasik Müzik'],
+      performers: evt.performers || '',
+      ticketPrice: evt.ticketPrice || 0,
+      isFree: Boolean(evt.isFree),
+      ticketUrl: evt.ticketUrl || '',
+      description: evt.description || '',
+      posterUrl: evt.posterUrl || '',
+      accessibilitySummary: evt.accessibilitySummary || [],
+    });
+    setActiveTab('create');
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    const res = await deleteEventAnnouncement(eventId);
+    setDeletingEventId(null);
+    if (res.success) {
+      setListFeedback({ type: 'success', text: 'Etkinlik duyurusu silindi.' });
+    } else {
+      setListFeedback({ type: 'error', text: res.error || 'Etkinlik silinemedi.' });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -210,7 +261,7 @@ export const EventsView: React.FC = () => {
       ? formData.posterUrl
       : '/src/assets/images/hero_culture_music_1794440056664.jpg';
 
-    const res = await addEventAnnouncement({
+    const payload = {
       title: formData.title,
       discipline: formData.discipline,
       category: formData.category,
@@ -230,17 +281,24 @@ export const EventsView: React.FC = () => {
       description: formData.description,
       posterUrl: defaultPoster,
       accessibilitySummary: formData.accessibilitySummary,
-    });
+    };
+
+    const res = editingEventId
+      ? await updateEventAnnouncement(editingEventId, payload)
+      : await addEventAnnouncement(payload);
 
     if (res.success) {
       setSubmitFeedback({
         success: true,
-        message: 'Etkinlik duyurunuz oluşturuldu ve moderatör onay kuyruğuna iletildi.',
+        message: editingEventId
+          ? 'Etkinlik duyurusu güncellendi.'
+          : 'Etkinlik duyurunuz oluşturuldu ve moderatör onay kuyruğuna iletildi.',
       });
       setTimeout(() => {
+        setEditingEventId(null);
         setActiveTab('list');
         setSubmitFeedback(null);
-      }, 1400);
+      }, 1000);
     } else {
       setSubmitFeedback({
         success: false,
@@ -461,14 +519,16 @@ export const EventsView: React.FC = () => {
       />
 
       {activeTab === 'create' ? (
-        <div className="architectural-grid bg-[#f8fafc] dark:bg-[#0c1527] py-10 px-4">
+        <div className="bg-[#f8fafc] dark:bg-[#0c1527] py-10 px-4">
           <div className="relative z-10 bg-white dark:bg-[#13213e] rounded-2xl border border-[#e2e8f0] dark:border-[#1e335a] p-6 sm:p-8 shadow-xs max-w-2xl mx-auto space-y-5">
             <div>
               <h2 className="text-base font-bold text-[#0f172a] dark:text-white">
-                Yeni Etkinlik Duyurusu Yayınla
+                {editingEventId ? 'Etkinlik Duyurusunu Güncelle' : 'Yeni Etkinlik Duyurusu Yayınla'}
               </h2>
               <p className="text-xs text-[#64748b] dark:text-slate-400 mt-0.5">
-                Etkinlik duyurunuz moderasyon onayından geçtikten sonra herkese açık takvimde listelenecektir.
+                {editingEventId
+                  ? 'Etkinlik detaylarını düzenleyip kaydedebilirsiniz.'
+                  : 'Etkinlik duyurunuz moderasyon onayından geçtikten sonra herkese açık takvimde listelenecektir.'}
               </p>
             </div>
 
@@ -662,7 +722,10 @@ export const EventsView: React.FC = () => {
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('list')}
+                  onClick={() => {
+                    setEditingEventId(null);
+                    setActiveTab('list');
+                  }}
                   className="px-4 py-2 text-xs font-semibold text-[#64748b] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white cursor-pointer"
                 >
                   Vazgeç
@@ -671,7 +734,7 @@ export const EventsView: React.FC = () => {
                   type="submit"
                   className="px-5 py-2.5 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] hover:opacity-90 rounded-xl transition-opacity shadow-xs cursor-pointer"
                 >
-                  Onaya Gönder
+                  {editingEventId ? 'Değişiklikleri Kaydet' : 'Onaya Gönder'}
                 </button>
               </div>
             </form>
@@ -760,13 +823,28 @@ export const EventsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="architectural-grid bg-[#f8fafc] dark:bg-[#0c1527] min-h-[60vh] transition-colors">
+          <div className="bg-[#f8fafc] dark:bg-[#0c1527] min-h-[60vh] transition-colors">
             <div className="relative z-10 max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col lg:flex-row gap-6 items-start">
               <aside className="hidden lg:block w-72 xl:w-80 shrink-0 bg-white dark:bg-[#13213e] rounded-2xl border border-[#e2e8f0] dark:border-[#1e335a] p-5 sticky top-24 shadow-xs">
                 {renderSidebarContent()}
               </aside>
 
               <div className="flex-1 min-w-0 w-full space-y-5">
+                {listFeedback && (
+                  <div
+                    role={listFeedback.type === 'error' ? 'alert' : 'status'}
+                    className={`p-3.5 rounded-2xl border text-xs font-medium flex items-center justify-between gap-2 ${
+                      listFeedback.type === 'error'
+                        ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+                        : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
+                    }`}
+                  >
+                    <span>{listFeedback.text}</span>
+                    <button type="button" onClick={() => setListFeedback(null)} className="hover:underline cursor-pointer">
+                      Kapat
+                    </button>
+                  </div>
+                )}
                 <div ref={resultsTopRef} className="scroll-mt-24 space-y-4">
                   <div className="flex flex-wrap items-center gap-2">
                     {CATEGORIES.slice(0, 5).map((cat) => {
@@ -1033,22 +1111,62 @@ export const EventsView: React.FC = () => {
                                 </button>
                               </div>
 
-                              {evt.ticketUrl ? (
-                                <a
-                                  href={evt.ticketUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="px-2.5 py-1 rounded-lg bg-[#f25922] hover:bg-[#d94b18] text-white text-[10px] font-bold inline-flex items-center gap-1 transition-colors"
-                                >
-                                  <span>Bilet</span>
-                                  <ExternalLink className="w-2.5 h-2.5" />
-                                </a>
-                              ) : (
-                                <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                                  Serbest Giriş
-                                </span>
+                                {evt.ticketUrl ? (
+                                  <a
+                                    href={evt.ticketUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-2.5 py-1 rounded-lg bg-[#f25922] hover:bg-[#d94b18] text-white text-[10px] font-bold inline-flex items-center gap-1 transition-colors"
+                                  >
+                                    <span>Bilet</span>
+                                    <ExternalLink className="w-2.5 h-2.5" />
+                                  </a>
+                                ) : (
+                                  <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                    Serbest Giriş
+                                  </span>
+                                )}
+                              </div>
+
+                              {canManageEvent(evt) && (
+                                <div className="px-3.5 py-2 bg-[#f1f3ff] dark:bg-[#0f1c38] border-t border-[#e2e8f0] dark:border-[#1e335a] flex items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditEvent(evt)}
+                                    className="text-[11px] font-semibold text-[#16274e] dark:text-slate-200 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                    <span>Düzenle</span>
+                                  </button>
+                                  {deletingEventId === evt.id ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteEvent(evt.id)}
+                                        className="px-2 py-0.5 rounded bg-rose-700 text-white text-[10px] font-bold cursor-pointer"
+                                      >
+                                        Silmeyi Onayla
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setDeletingEventId(null)}
+                                        className="text-[10px] text-[#64748b] cursor-pointer"
+                                      >
+                                        Vazgeç
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingEventId(evt.id)}
+                                      className="text-[11px] font-semibold text-rose-700 dark:text-rose-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>Sil</span>
+                                    </button>
+                                  )}
+                                </div>
                               )}
-                            </div>
                           </article>
                         ))}
                       </div>
@@ -1101,6 +1219,35 @@ export const EventsView: React.FC = () => {
                               >
                                 <Download className="w-3.5 h-3.5" />
                               </a>
+                              {canManageEvent(evt) && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditEvent(evt)}
+                                    className="px-2.5 py-2 rounded-lg bg-[#f1f3ff] dark:bg-[#0f1c38] border border-[#dae2ff] dark:border-[#1e335a] text-xs font-semibold text-[#16274e] dark:text-white inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                    <span>Düzenle</span>
+                                  </button>
+                                  {deletingEventId === evt.id ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteEvent(evt.id)}
+                                      className="px-2.5 py-2 rounded-lg bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                                    >
+                                      Onayla
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingEventId(evt.id)}
+                                      className="px-2.5 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 text-xs font-semibold cursor-pointer"
+                                    >
+                                      Sil
+                                    </button>
+                                  )}
+                                </>
+                              )}
                             </div>
                           </article>
                         ))}

@@ -25,6 +25,7 @@ export function createApp(options?: { dbPath?: string }): { app: Express; db: Db
   seedDatabase(db);
 
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '5mb' }));
   app.use(cookieParser());
   app.use(attachSessionUser(db));
@@ -50,6 +51,8 @@ export function createApp(options?: { dbPath?: string }): { app: Express; db: Db
 async function startServer() {
   const { app } = createApp();
   const isProd = process.env.NODE_ENV === 'production';
+
+  app.use('/src/assets/images', express.static(path.resolve(process.cwd(), 'src/assets/images')));
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');

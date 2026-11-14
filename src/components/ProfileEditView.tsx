@@ -151,6 +151,7 @@ const ProfileEditForm: React.FC<{ currentArtist: NonNullable<ReturnType<typeof u
   );
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [avatarDragging, setAvatarDragging] = useState(false);
   const [coverDragging, setCoverDragging] = useState(false);
   const [showManualUrl, setShowManualUrl] = useState(false);
@@ -263,6 +264,8 @@ const ProfileEditForm: React.FC<{ currentArtist: NonNullable<ReturnType<typeof u
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaveError(null);
+    setSavedSuccess(false);
 
     const res = await updateArtistProfile({
       fullName,
@@ -290,6 +293,8 @@ const ProfileEditForm: React.FC<{ currentArtist: NonNullable<ReturnType<typeof u
       setTimeout(() => {
         navigateTo('artist_profile', currentArtist.id);
       }, 600);
+    } else {
+      setSaveError(res.error || 'Profil kaydedilirken bir hata oluştu. Lütfen tekrar deneyin.');
     }
   };
 
@@ -308,7 +313,7 @@ const ProfileEditForm: React.FC<{ currentArtist: NonNullable<ReturnType<typeof u
 
         <div className="flex flex-wrap items-center gap-2">
           {savedSuccess && (
-            <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
+            <div role="status" className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
               <CheckCircle className="w-3.5 h-3.5" />
               <span>Değişiklikler Kaydedildi!</span>
             </div>
@@ -316,13 +321,29 @@ const ProfileEditForm: React.FC<{ currentArtist: NonNullable<ReturnType<typeof u
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#16274e] hover:bg-[#111d38] dark:bg-[#f25922] dark:hover:bg-[#d94b18] text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#16274e] hover:bg-[#111d38] dark:bg-[#f25922] dark:hover:bg-[#d94b18] text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>Profili Kaydet ve Yayınla</span>
           </button>
         </div>
       </div>
+
+      {saveError && (
+        <div
+          role="alert"
+          className="mb-5 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-800 dark:text-rose-200 flex items-center justify-between gap-3"
+        >
+          <span>{saveError}</span>
+          <button
+            type="button"
+            onClick={() => setSaveError(null)}
+            className="underline shrink-0 cursor-pointer"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* Banner and Avatar section with Drag & Drop / File Selector */}

@@ -18,6 +18,17 @@ import { notifyUser } from '../services/notificationService';
 export function createEcosystemRouter(db: DbInstance): Router {
   const router = Router();
 
+  const isOrgAuthorized = (orgId: string, user: NonNullable<AuthedRequest['user']>): boolean => {
+    if (user.activeRole === 'admin') return true;
+    const org = db.prepare('SELECT owner_user_id FROM organizations WHERE id = ?').get(orgId) as any;
+    if (!org) return false;
+    if (org.owner_user_id === user.id) return true;
+    const member = db
+      .prepare(`SELECT id FROM organization_members WHERE organization_id = ? AND user_id = ? AND status = 'active'`)
+      .get(orgId, user.id);
+    return Boolean(member);
+  };
+
   // ============================================================================
   // 9.1 Project Lab & Collaborative Workspace
   // ============================================================================
@@ -317,6 +328,9 @@ export function createEcosystemRouter(db: DbInstance): Router {
     const { organizationId, title, year = 2027, serviceMode = 'self_service', totalBudget = 100000 } = req.body || {};
     const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId) as any;
     if (!org) return res.status(404).json({ error: 'Kurum bulunamadı.' });
+    if (!isOrgAuthorized(org.id, req.user!)) {
+      return res.status(403).json({ error: 'Bu kurum adına program oluşturma yetkiniz bulunmamaktadır.' });
+    }
 
     const id = newId('cp');
     const now = new Date().toISOString();
@@ -342,6 +356,9 @@ export function createEcosystemRouter(db: DbInstance): Router {
   router.post('/culture-desk/programs/:id/events', requireAuth, requireFeatureFlag(db, 'culture_desk'), (req: AuthedRequest, res) => {
     const cp = db.prepare('SELECT * FROM cultural_programs WHERE id = ?').get(req.params.id) as any;
     if (!cp) return res.status(404).json({ error: 'Program bulunamadı.' });
+    if (!isOrgAuthorized(cp.organization_id, req.user!)) {
+      return res.status(403).json({ error: 'Bu programa etkinlik ekleme yetkiniz bulunmamaktadır.' });
+    }
 
     const { month = 'Ocak 2027', title, discipline = 'Müzik', venueName = 'Ana Salon', budget = 25000 } = req.body || {};
     if (!title) return res.status(400).json({ error: 'Etkinlik başlığı zorunludur.' });
@@ -365,6 +382,9 @@ export function createEcosystemRouter(db: DbInstance): Router {
   router.patch('/culture-desk/programs/:id/service-mode', requireAuth, requireFeatureFlag(db, 'culture_desk'), (req: AuthedRequest, res) => {
     const cp = db.prepare('SELECT * FROM cultural_programs WHERE id = ?').get(req.params.id) as any;
     if (!cp) return res.status(404).json({ error: 'Program bulunamadı.' });
+    if (!isOrgAuthorized(cp.organization_id, req.user!)) {
+      return res.status(403).json({ error: 'Bu programın yönetim modunu değiştirme yetkiniz bulunmamaktadır.' });
+    }
     const { serviceMode } = req.body || {};
     if (!['self_service', 'managed_service'].includes(serviceMode)) {
       return res.status(400).json({ error: 'Geçersiz yönetim modu.' });

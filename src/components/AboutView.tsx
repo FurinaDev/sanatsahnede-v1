@@ -60,7 +60,7 @@ export const AboutView: React.FC = () => {
         ]}
       />
 
-      <div className="architectural-grid bg-[#f8fafc] dark:bg-[#0c1527] py-10 sm:py-14 transition-colors">
+      <div className="bg-[#f8fafc] dark:bg-[#0c1527] py-10 sm:py-14 transition-colors">
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           {/* Editorial Vision Story Card */}
           <motion.section

@@ -109,6 +109,101 @@ export function createEventsRouter(db: DbInstance): Router {
     return res.status(201).json({ event: mapEvent(created) });
   });
 
+  router.patch('/:id', requireAuth, (req: AuthedRequest, res) => {
+    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'Etkinlik bulunamadı.' });
+
+    const isStaff = ['admin', 'moderator'].includes(req.user!.activeRole);
+    if (row.creator_user_id !== req.user!.id && !isStaff) {
+      return res.status(403).json({ error: 'Bu etkinliği düzenleme yetkiniz yok.' });
+    }
+
+    const {
+      title,
+      discipline,
+      category,
+      organizerName,
+      organizerContact,
+      venueName,
+      city,
+      district,
+      eventDate,
+      startTime,
+      endTime,
+      genres,
+      performers,
+      ticketPrice,
+      isFree,
+      ticketUrl,
+      description,
+      posterUrl,
+      accessibilitySummary,
+    } = req.body || {};
+
+    db.prepare(`
+      UPDATE events SET
+        title = COALESCE(?, title),
+        discipline = COALESCE(?, discipline),
+        category = COALESCE(?, category),
+        organizer_name = COALESCE(?, organizer_name),
+        organizer_contact = COALESCE(?, organizer_contact),
+        venue_name = COALESCE(?, venue_name),
+        city = COALESCE(?, city),
+        district = COALESCE(?, district),
+        event_date = COALESCE(?, event_date),
+        start_time = COALESCE(?, start_time),
+        end_time = COALESCE(?, end_time),
+        genres_json = COALESCE(?, genres_json),
+        performers = COALESCE(?, performers),
+        ticket_price = COALESCE(?, ticket_price),
+        is_free = COALESCE(?, is_free),
+        ticket_url = COALESCE(?, ticket_url),
+        description = COALESCE(?, description),
+        poster_url = COALESCE(?, poster_url),
+        accessibility_summary_json = COALESCE(?, accessibility_summary_json)
+      WHERE id = ?
+    `).run(
+      title !== undefined ? String(title).trim() : null,
+      discipline ?? null,
+      category ?? null,
+      organizerName ?? null,
+      organizerContact ?? null,
+      venueName ?? null,
+      city ?? null,
+      district ?? null,
+      eventDate ?? null,
+      startTime ?? null,
+      endTime ?? null,
+      genres !== undefined ? JSON.stringify(Array.isArray(genres) ? genres : []) : null,
+      performers ?? null,
+      isFree === true ? 0 : ticketPrice !== undefined ? Number(ticketPrice) : null,
+      isFree !== undefined ? (isFree ? 1 : 0) : null,
+      ticketUrl ?? null,
+      description !== undefined ? String(description).trim() : null,
+      posterUrl ?? null,
+      accessibilitySummary !== undefined ? JSON.stringify(Array.isArray(accessibilitySummary) ? accessibilitySummary : []) : null,
+      row.id
+    );
+
+    logAudit(db, { userId: req.user!.id, action: 'UPDATE_EVENT', resourceType: 'event', resourceId: row.id });
+    const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
+    return res.json({ event: mapEvent(updated) });
+  });
+
+  router.delete('/:id', requireAuth, (req: AuthedRequest, res) => {
+    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'Etkinlik bulunamadı.' });
+
+    const isStaff = ['admin', 'moderator'].includes(req.user!.activeRole);
+    if (row.creator_user_id !== req.user!.id && !isStaff) {
+      return res.status(403).json({ error: 'Bu etkinliği silme yetkiniz yok.' });
+    }
+
+    db.prepare('DELETE FROM events WHERE id = ?').run(row.id);
+    logAudit(db, { userId: req.user!.id, action: 'DELETE_EVENT', resourceType: 'event', resourceId: row.id });
+    return res.json({ success: true });
+  });
+
   // 9.9 Calendar .ics export
   router.get('/:id/ics', (req, res) => {
     const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id) as any;

@@ -21,6 +21,8 @@ import {
   Layers,
   Scale,
   X,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 
 export const BusinessDashboard: React.FC = () => {
@@ -41,6 +43,8 @@ export const BusinessDashboard: React.FC = () => {
     reviews,
     settings,
     createListing,
+    updateListing,
+    closeListing,
     shortlistApplication,
     rejectApplication,
     selectApplicantAndCreateBooking,
@@ -68,8 +72,10 @@ export const BusinessDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'listings' | 'applications' | 'offers' | 'bookings' | 'verification'>('listings');
   const [selectedListingForApps, setSelectedListingForApps] = useState<string>('');
 
-  // New Listing Form Modal state
+  // New / Edit Listing Form Modal state
   const [isCreatingListing, setIsCreatingListing] = useState(false);
+  const [editingListingId, setEditingListingId] = useState<string | null>(null);
+  const [closingListingId, setClosingListingId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newDiscipline, setNewDiscipline] = useState<ArtDiscipline>('Müzik');
   const [newEventType, setNewEventType] = useState('Lobi & Salon Konseri');
@@ -87,13 +93,12 @@ export const BusinessDashboard: React.FC = () => {
   const [newVenue, setNewVenue] = useState('');
   const [newSoundSystem, setNewSoundSystem] = useState(true);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
 
   // Verification request form state
   const [verifDocUrl, setVerifDocUrl] = useState('');
   const [verifSubmitted, setVerifSubmitted] = useState(false);
-  const [actionBanner, setActionBanner] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Modals
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
@@ -164,12 +169,51 @@ export const BusinessDashboard: React.FC = () => {
     }
   };
 
+  const openCreateListingModal = () => {
+    setEditingListingId(null);
+    setCreateError(null);
+    setNewTitle('');
+    setNewDiscipline('Müzik');
+    setNewEventType('Lobi & Salon Konseri');
+    setNewEnsembleType('Trio');
+    setNewCity(business.city || 'İstanbul');
+    setNewBudget(20000);
+    setNewDate('2026-12-05');
+    setNewDuration(60);
+    setNewStartTime('20:00');
+    setNewEndTime('21:00');
+    setNewDeadline('2026-11-30');
+    setNewDesc('');
+    setNewVenue(`${business.businessName} Ana Salon`);
+    setNewSoundSystem(true);
+    setIsCreatingListing(true);
+  };
+
+  const openEditListingModal = (l: typeof businessListings[number]) => {
+    setEditingListingId(l.id);
+    setCreateError(null);
+    setNewTitle(l.title);
+    setNewDiscipline(l.discipline || 'Müzik');
+    setNewEventType(l.eventType || 'Lobi & Salon Konseri');
+    setNewEnsembleType(l.targetEnsembleType || 'Trio');
+    setNewCity(l.city || business.city);
+    setNewBudget(l.budgetAmount);
+    setNewDate(l.eventDate);
+    setNewDuration(l.durationMins || 60);
+    setNewStartTime(l.startTime || '20:00');
+    setNewEndTime(l.endTime || '21:00');
+    setNewDeadline(l.applicationDeadline || '2026-11-30');
+    setNewDesc(l.description || '');
+    setNewVenue(l.venueName || `${business.businessName} Ana Salon`);
+    setNewSoundSystem(Boolean(l.soundSystemProvided));
+    setIsCreatingListing(true);
+  };
+
   const handleCreateListingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
-    setCreateSuccess(null);
 
-    if (!canBusinessCreateListing(business)) {
+    if (!editingListingId && !canBusinessCreateListing(business)) {
       setCreateError(
         'Yetkisiz İşlem: Yalnızca doğrulaması onaylanmış işletmeler ilan açabilir. Lütfen "Doğrulama & Akreditasyon" sekmesini tamamlayınız.'
       );
@@ -181,7 +225,7 @@ export const BusinessDashboard: React.FC = () => {
       return;
     }
 
-    const res = await createListing({
+    const payload = {
       title: newTitle,
       discipline: newDiscipline,
       eventType: newEventType,
@@ -198,13 +242,27 @@ export const BusinessDashboard: React.FC = () => {
       description: newDesc,
       venueName: newVenue || `${business.businessName} Ana Salon`,
       soundSystemProvided: newSoundSystem,
-    });
+    };
+
+    if (editingListingId) {
+      const res = await updateListing(editingListingId, payload);
+      if (res.success) {
+        setIsCreatingListing(false);
+        setEditingListingId(null);
+        setActionFeedback({ type: 'success', text: 'İlan bilgileri başarıyla güncellendi.' });
+      } else {
+        setCreateError(res.error || 'İlan güncellenemedi.');
+      }
+      return;
+    }
+
+    const res = await createListing(payload);
 
     if (res.success) {
       setIsCreatingListing(false);
       setNewTitle('');
       setNewDesc('');
-      setCreateSuccess('İlanınız oluşturuldu ve moderasyon onay kuyruğuna iletildi.');
+      setActionFeedback({ type: 'success', text: 'İlanınız oluşturuldu ve moderasyon onay kuyruğuna iletildi.' });
       if (res.listing?.id) {
         setSelectedListingForApps(res.listing.id);
       }
@@ -213,13 +271,41 @@ export const BusinessDashboard: React.FC = () => {
     }
   };
 
+  const handleCloseListing = async (listingId: string) => {
+    const res = await closeListing(listingId);
+    setClosingListingId(null);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'İlan başvurulara kapatıldı / iptal edildi.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'İlan kapatılamadı.' });
+    }
+  };
+
+  const handleShortlist = async (appId: string) => {
+    const res = await shortlistApplication(appId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Aday kısa listeye alındı.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Kısa listeye alma başarısız.' });
+    }
+  };
+
+  const handleRejectApp = async (appId: string) => {
+    const res = await rejectApplication(appId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Başvuru reddedildi.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Başvuru reddedilemedi.' });
+    }
+  };
+
   const handleSelectCandidate = async (appId: string) => {
     const res = await selectApplicantAndCreateBooking(appId);
     if (res.success) {
-      setActionBanner('Aday seçildi, dijital sözleşme oluşturuldu ve rezervasyon başlatıldı.');
+      setActionFeedback({ type: 'success', text: 'Aday seçildi, dijital sözleşme oluşturuldu ve rezervasyon başlatıldı.' });
       setActiveTab('bookings');
     } else {
-      setActionBanner(res.error || 'Rezervasyon başlatılamadı.');
+      setActionFeedback({ type: 'error', text: res.error || 'Rezervasyon başlatılamadı.' });
     }
   };
 
@@ -235,23 +321,78 @@ export const BusinessDashboard: React.FC = () => {
       scopeNotes: 'İşletme resmi teklifi',
     });
     if (res.success) {
-      setActionBanner(`${app.applicantName} için teklif gönderildi.`);
+      setActionFeedback({ type: 'success', text: `${app.applicantName} için resmi teklif gönderildi.` });
       setActiveTab('offers');
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Teklif gönderilemedi.' });
+    }
+  };
+
+  const handleAcceptOffer = async (offerId: string) => {
+    const res = await acceptOffer(offerId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Teklif onaylandı ve dijital sözleşme aşamasına geçildi.' });
+      setActiveTab('bookings');
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Teklif onaylanamadı.' });
+    }
+  };
+
+  const handleRejectOffer = async (offerId: string) => {
+    const res = await rejectOffer(offerId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Teklif reddedildi.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Teklif reddedilemedi.' });
+    }
+  };
+
+  const handleAcceptContract = async (bookingId: string) => {
+    const res = await acceptContract(bookingId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Dijital sözleşme işletme tarafından onaylandı.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Sözleşme onaylanamadı.' });
+    }
+  };
+
+  const handlePaySandbox = async (bookingId: string) => {
+    const res = await payBookingSandbox(bookingId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Sandbox güvence ödemesi alındı ve rezervasyon kesinleşti.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Ödeme işlemi gerçekleştirilemedi.' });
+    }
+  };
+
+  const handleCompleteEmployer = async (bookingId: string) => {
+    const res = await completeEmployerService(bookingId);
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Hizmet tamamlanma onayınız kaydedildi.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Tamamlanma onayı kaydedilemedi.' });
     }
   };
 
   const handleConfirmCancellation = async () => {
     if (!cancellingBookingId) return;
-    await cancelBooking(cancellingBookingId, cancellationReason || 'İşletme organizasyon değişikliği');
+    const res = await cancelBooking(cancellingBookingId, cancellationReason || 'İşletme organizasyon değişikliği');
     setCancellingBookingId(null);
     setCancellationReason('');
+    if (res.success) {
+      setActionFeedback({ type: 'success', text: 'Rezervasyon iptal edildi ve varsa ödeme havuzu iade sürecine alındı.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Rezervasyon iptal edilemedi.' });
+    }
   };
 
   const handleTriggerEmergencyReplacement = async (bookingId: string) => {
     const res = await createEmergencyReplacement(bookingId);
     if (res.success) {
-      setActionBanner('Acil İkame İlanı başarıyla oluşturuldu ve öncelikli olarak yayına alındı.');
+      setActionFeedback({ type: 'success', text: 'Acil İkame İlanı başarıyla oluşturuldu ve öncelikli olarak yayına alındı.' });
       setActiveTab('listings');
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Acil ikame ilanı oluşturulamadı.' });
     }
   };
 
@@ -259,7 +400,12 @@ export const BusinessDashboard: React.FC = () => {
     e.preventDefault();
     if (!verifDocUrl) return;
     const res = await submitVerificationRequest('business', business.businessName, verifDocUrl);
-    if (res.success) setVerifSubmitted(true);
+    if (res.success) {
+      setVerifSubmitted(true);
+      setActionFeedback({ type: 'success', text: 'Doğrulama belgeniz inceleme kuyruğuna iletildi.' });
+    } else {
+      setActionFeedback({ type: 'error', text: res.error || 'Doğrulama başvurusu gönderilemedi.' });
+    }
   };
 
   const activeContract = contractViewBookingId
@@ -338,7 +484,7 @@ export const BusinessDashboard: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => setIsCreatingListing(true)}
+              onClick={openCreateListingModal}
               className="px-5 py-2.5 text-xs font-bold text-white bg-[#f25922] hover:bg-[#ad3300] rounded-xl transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
             >
               <PlusCircle className="w-4 h-4 text-white" />
@@ -369,16 +515,20 @@ export const BusinessDashboard: React.FC = () => {
         </div>
       </div>
 
-      {(actionBanner || createSuccess) && (
-        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs font-medium text-emerald-900 dark:text-emerald-300 flex items-center justify-between gap-3">
-          <span>{actionBanner || createSuccess}</span>
+      {actionFeedback && (
+        <div
+          role={actionFeedback.type === 'error' ? 'alert' : 'status'}
+          className={`p-4 rounded-2xl border text-xs font-medium flex items-center justify-between gap-3 ${
+            actionFeedback.type === 'error'
+              ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+              : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
+          }`}
+        >
+          <span>{actionFeedback.text}</span>
           <button
             type="button"
-            onClick={() => {
-              setActionBanner(null);
-              setCreateSuccess(null);
-            }}
-            className="text-emerald-700 dark:text-emerald-400 hover:underline shrink-0 cursor-pointer"
+            onClick={() => setActionFeedback(null)}
+            className="hover:underline shrink-0 cursor-pointer"
           >
             Kapat
           </button>
@@ -398,7 +548,7 @@ export const BusinessDashboard: React.FC = () => {
               <p className="text-sm text-[#475569] dark:text-slate-300">Henüz yayınlanmış bir ilanınız bulunmamaktadır.</p>
               <button
                 type="button"
-                onClick={() => setIsCreatingListing(true)}
+                onClick={openCreateListingModal}
                 className="px-4 py-2 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] rounded-xl cursor-pointer"
               >
                 İlk İlanınızı Açın
@@ -454,6 +604,8 @@ export const BusinessDashboard: React.FC = () => {
                           ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300'
                           : l.status === 'pending_moderation'
                           ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300'
+                          : l.status === 'cancelled' || l.status === 'rejected'
+                          ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
                           : 'bg-[#f8fafc] dark:bg-[#0f1c38] text-[#475569] dark:text-slate-300'
                       }`}
                     >
@@ -463,20 +615,67 @@ export const BusinessDashboard: React.FC = () => {
                         ? 'Moderasyon Onayı Bekliyor'
                         : l.status === 'assigned'
                         ? 'Sanatçı Seçildi / Anlaşmada'
+                        : l.status === 'cancelled'
+                        ? 'Kapatıldı / İptal'
+                        : l.status === 'rejected'
+                        ? 'Moderasyon Reddetti'
+                        : l.status === 'completed'
+                        ? 'Tamamlandı'
                         : l.status}
                     </span>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedListingForApps(l.id);
-                        setActiveTab('applications');
-                      }}
-                      className="text-xs font-semibold text-[#f25922] hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>Başvuruları İncele</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {['draft', 'pending_moderation', 'active'].includes(l.status) && (
+                        <button
+                          type="button"
+                          onClick={() => openEditListingModal(l)}
+                          className="px-2.5 py-1 text-xs font-semibold text-[#16274e] dark:text-slate-200 bg-[#f1f3ff] dark:bg-[#0f1c38] border border-[#dae2ff] dark:border-[#1e335a] rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Düzenle</span>
+                        </button>
+                      )}
+                      {!['assigned', 'completed', 'cancelled'].includes(l.status) && (
+                        closingListingId === l.id ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleCloseListing(l.id)}
+                              className="px-2.5 py-1 text-[11px] font-bold text-white bg-rose-700 rounded-lg cursor-pointer"
+                            >
+                              Kapatmayı Onayla
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setClosingListingId(null)}
+                              className="px-2 py-1 text-[11px] font-semibold text-[#64748b] cursor-pointer"
+                            >
+                              Vazgeç
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setClosingListingId(l.id)}
+                            className="px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>İlanı Kapat</span>
+                          </button>
+                        )
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedListingForApps(l.id);
+                          setActiveTab('applications');
+                        }}
+                        className="text-xs font-semibold text-[#f25922] hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>Başvuruları İncele</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -573,49 +772,72 @@ export const BusinessDashboard: React.FC = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#e2e8f0] dark:border-[#1e335a]">
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-[#f8fafc] dark:bg-[#0f1c38] text-[#475569] dark:text-slate-300">
-                      Durum: {app.status}
+                    <span
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${
+                        app.status === 'withdrawn'
+                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          : app.status === 'selected'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                          : app.status === 'rejected'
+                          ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+                          : 'bg-[#f8fafc] dark:bg-[#0f1c38] text-[#475569] dark:text-slate-300'
+                      }`}
+                    >
+                      Durum:{' '}
+                      {app.status === 'submitted'
+                        ? 'İnceleniyor'
+                        : app.status === 'shortlisted'
+                        ? 'Kısa Listede'
+                        : app.status === 'selected'
+                        ? 'Seçildi'
+                        : app.status === 'rejected'
+                        ? 'Reddedildi'
+                        : app.status === 'withdrawn'
+                        ? 'Başvuru Geri Çekildi'
+                        : app.status}
                     </span>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {app.status !== 'shortlisted' && app.status !== 'selected' && (
-                        <button
-                          type="button"
-                          onClick={() => shortlistApplication(app.id)}
-                          className="px-3.5 py-2 text-xs font-semibold text-[#475569] dark:text-slate-200 bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] rounded-xl cursor-pointer"
-                        >
-                          Kısa Listeye Al
-                        </button>
-                      )}
-                      {app.status !== 'selected' && (
-                        <button
-                          type="button"
-                          onClick={() => handleSendQuickOffer(app)}
-                          className="px-3.5 py-2 text-xs font-semibold text-[#16274e] dark:text-slate-200 bg-[#f1f3ff] dark:bg-[#0f1c38] border border-[#dae2ff] dark:border-[#1e335a] rounded-xl cursor-pointer"
-                        >
-                          Resmi Teklif Gönder
-                        </button>
-                      )}
-                      {app.status !== 'rejected' && app.status !== 'selected' && (
-                        <button
-                          type="button"
-                          onClick={() => rejectApplication(app.id)}
-                          className="px-3.5 py-2 text-xs font-semibold text-rose-700 dark:text-rose-400 hover:bg-rose-50 rounded-xl cursor-pointer"
-                        >
-                          Reddet
-                        </button>
-                      )}
-                      {app.status !== 'selected' && (
-                        <button
-                          type="button"
-                          onClick={() => handleSelectCandidate(app.id)}
-                          className="px-5 py-2 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] hover:opacity-90 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Seç &amp; Sözleşme Başlat</span>
-                        </button>
-                      )}
-                    </div>
+                    {app.status !== 'withdrawn' && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {app.status !== 'shortlisted' && app.status !== 'selected' && (
+                          <button
+                            type="button"
+                            onClick={() => handleShortlist(app.id)}
+                            className="px-3.5 py-2 text-xs font-semibold text-[#475569] dark:text-slate-200 bg-[#f8fafc] dark:bg-[#0f1c38] border border-[#e2e8f0] dark:border-[#1e335a] rounded-xl cursor-pointer"
+                          >
+                            Kısa Listeye Al
+                          </button>
+                        )}
+                        {app.status !== 'selected' && (
+                          <button
+                            type="button"
+                            onClick={() => handleSendQuickOffer(app)}
+                            className="px-3.5 py-2 text-xs font-semibold text-[#16274e] dark:text-slate-200 bg-[#f1f3ff] dark:bg-[#0f1c38] border border-[#dae2ff] dark:border-[#1e335a] rounded-xl cursor-pointer"
+                          >
+                            Resmi Teklif Gönder
+                          </button>
+                        )}
+                        {app.status !== 'rejected' && app.status !== 'selected' && (
+                          <button
+                            type="button"
+                            onClick={() => handleRejectApp(app.id)}
+                            className="px-3.5 py-2 text-xs font-semibold text-rose-700 dark:text-rose-400 hover:bg-rose-50 rounded-xl cursor-pointer"
+                          >
+                            Reddet
+                          </button>
+                        )}
+                        {app.status !== 'selected' && (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectCandidate(app.id)}
+                            className="px-5 py-2 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] hover:opacity-90 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Seç &amp; Sözleşme Başlat</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -667,7 +889,7 @@ export const BusinessDashboard: React.FC = () => {
                         {waitingForMe && (
                           <button
                             type="button"
-                            onClick={() => acceptOffer(off.id)}
+                            onClick={() => handleAcceptOffer(off.id)}
                             className="px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer"
                           >
                             Teklifi Onayla &amp; Sözleşmeye Geç
@@ -686,7 +908,7 @@ export const BusinessDashboard: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => rejectOffer(off.id)}
+                          onClick={() => handleRejectOffer(off.id)}
                           className="px-3 py-2 rounded-xl text-rose-700 text-xs font-semibold cursor-pointer"
                         >
                           Reddet
@@ -813,7 +1035,7 @@ export const BusinessDashboard: React.FC = () => {
                         {b.status === 'agreement_pending' && !b.contractTermsAcceptedByEmployer && (
                           <button
                             type="button"
-                            onClick={() => acceptContract(b.id)}
+                            onClick={() => handleAcceptContract(b.id)}
                             className="px-4 py-2 text-xs font-bold text-white bg-[#16274e] rounded-xl cursor-pointer"
                           >
                             Sözleşmeyi Onayla
@@ -823,7 +1045,7 @@ export const BusinessDashboard: React.FC = () => {
                         {b.status === 'payment_pending' && (
                           <button
                             type="button"
-                            onClick={() => payBookingSandbox(b.id)}
+                            onClick={() => handlePaySandbox(b.id)}
                             className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
                           >
                             <CreditCard className="w-4 h-4 text-emerald-300" />
@@ -834,7 +1056,7 @@ export const BusinessDashboard: React.FC = () => {
                         {(b.status === 'confirmed' || b.status === 'performer_completed') && !b.employerCompletedAt && (
                           <button
                             type="button"
-                            onClick={() => completeEmployerService(b.id)}
+                            onClick={() => handleCompleteEmployer(b.id)}
                             className="px-5 py-2 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] rounded-xl flex items-center gap-1.5 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
@@ -956,8 +1178,18 @@ export const BusinessDashboard: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-slate-950/65 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white dark:bg-[#13213e] rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto p-6 sm:p-8 text-left shadow-2xl border border-[#e2e8f0] dark:border-[#1e335a]">
             <div className="flex items-center justify-between pb-4 border-b border-[#e2e8f0] dark:border-[#1e335a]">
-              <h2 className="font-display text-base font-bold text-[#0f172a] dark:text-white">Yeni Etkinlik İlanı Oluştur</h2>
-              <button type="button" onClick={() => setIsCreatingListing(false)} className="cursor-pointer">
+              <h2 className="font-display text-base font-bold text-[#0f172a] dark:text-white">
+                {editingListingId ? 'Etkinlik İlanını Düzenle' : 'Yeni Etkinlik İlanı Oluştur'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCreatingListing(false);
+                  setEditingListingId(null);
+                }}
+                aria-label="Kapat"
+                className="cursor-pointer"
+              >
                 <X className="w-5 h-5 text-[#64748b]" />
               </button>
             </div>
@@ -1126,7 +1358,10 @@ export const BusinessDashboard: React.FC = () => {
               <div className="pt-4 border-t border-[#e2e8f0] dark:border-[#1e335a] flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsCreatingListing(false)}
+                  onClick={() => {
+                    setIsCreatingListing(false);
+                    setEditingListingId(null);
+                  }}
                   className="px-4 py-2 text-xs font-semibold text-[#475569] dark:text-slate-300 rounded-xl cursor-pointer"
                 >
                   Vazgeç
@@ -1135,7 +1370,7 @@ export const BusinessDashboard: React.FC = () => {
                   type="submit"
                   className="px-6 py-2 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] rounded-xl shadow-sm cursor-pointer"
                 >
-                  İlanı Onaya Gönder
+                  {editingListingId ? 'Değişiklikleri Kaydet' : 'İlanı Onaya Gönder'}
                 </button>
               </div>
             </form>
@@ -1195,8 +1430,13 @@ export const BusinessDashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={async () => {
-                  await counterOffer(counterOfferId, counterAmount, counterNote);
+                  const res = await counterOffer(counterOfferId, counterAmount, counterNote);
                   setCounterOfferId(null);
+                  if (res.success) {
+                    setActionFeedback({ type: 'success', text: 'Karşı teklif gönderildi.' });
+                  } else {
+                    setActionFeedback({ type: 'error', text: res.error || 'Karşı teklif gönderilemedi.' });
+                  }
                 }}
                 className="px-4 py-2 text-xs font-bold text-white bg-[#f25922] rounded-xl cursor-pointer"
               >
@@ -1234,10 +1474,15 @@ export const BusinessDashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={async () => {
-                  await openDispute(disputeBookingId, disputeReason || 'Hizmet uyuşmazlığı', disputeEvidence);
+                  const res = await openDispute(disputeBookingId, disputeReason || 'Hizmet uyuşmazlığı', disputeEvidence);
                   setDisputeBookingId(null);
                   setDisputeReason('');
                   setDisputeEvidence('');
+                  if (res.success) {
+                    setActionFeedback({ type: 'success', text: 'Uyuşmazlık kaydı açıldı ve ödeme bloke edildi.' });
+                  } else {
+                    setActionFeedback({ type: 'error', text: res.error || 'Uyuşmazlık kaydı açılamadı.' });
+                  }
                 }}
                 className="px-4 py-2 text-xs font-bold text-white bg-amber-700 rounded-xl cursor-pointer"
               >
@@ -1277,13 +1522,18 @@ export const BusinessDashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={async () => {
-                  await submitReview(
+                  const res = await submitReview(
                     reviewBookingId,
                     { overall: reviewScore, quality: reviewScore, comm: reviewScore, prof: reviewScore },
                     reviewComment
                   );
                   setReviewBookingId(null);
                   setReviewComment('');
+                  if (res.success) {
+                    setActionFeedback({ type: 'success', text: 'Değerlendirmeniz yayınlandı.' });
+                  } else {
+                    setActionFeedback({ type: 'error', text: res.error || 'Değerlendirme gönderilemedi.' });
+                  }
                 }}
                 className="px-4 py-2 text-xs font-bold text-white bg-[#f25922] rounded-xl cursor-pointer"
               >

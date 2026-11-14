@@ -26,6 +26,7 @@ export function rowToUser(row: any): User {
     emailVerified: Boolean(row.email_verified),
     phoneVerified: Boolean(row.phone_verified),
     kycStatus: row.kyc_status || 'unsubmitted',
+    status: (row.status as 'active' | 'suspended') || 'active',
     isDemo: Boolean(row.is_demo),
     createdAt: row.created_at,
   };
@@ -33,8 +34,15 @@ export function rowToUser(row: any): User {
 
 export function attachSessionUser(db: DbInstance) {
   return (req: AuthedRequest, _res: Response, next: NextFunction) => {
-    const rawCookie = req.cookies?.[SESSION_COOKIE_NAME];
-    if (!rawCookie || typeof rawCookie !== 'string') {
+    const authHeader = req.headers.authorization;
+    const bearerToken =
+      typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : '';
+    const rawCookie =
+      (typeof req.cookies?.[SESSION_COOKIE_NAME] === 'string' && req.cookies[SESSION_COOKIE_NAME]) ||
+      bearerToken;
+    if (!rawCookie) {
       return next();
     }
 

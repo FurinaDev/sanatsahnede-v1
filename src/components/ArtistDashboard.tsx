@@ -13,6 +13,8 @@ import {
   Award,
   CalendarDays,
   X,
+  Pencil,
+  AlertCircle,
 } from 'lucide-react';
 
 export const ArtistDashboard: React.FC = () => {
@@ -36,6 +38,7 @@ export const ArtistDashboard: React.FC = () => {
     counterOffer,
     acceptOffer,
     rejectOffer,
+    withdrawApplication,
     openDispute,
     submitReview,
     submitVerificationRequest,
@@ -63,6 +66,7 @@ export const ArtistDashboard: React.FC = () => {
   const [counterOfferId, setCounterOfferId] = useState<string | null>(null);
   const [counterAmount, setCounterAmount] = useState(20000);
   const [counterNote, setCounterNote] = useState('');
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   if (!isAuthenticated) {
     return (
@@ -112,9 +116,25 @@ export const ArtistDashboard: React.FC = () => {
 
   const handleArtistCancel = async () => {
     if (!cancellingBookingId) return;
-    await cancelBooking(cancellingBookingId, cancelReason || 'Sanatçı mazereti');
+    const res = await cancelBooking(cancellingBookingId, cancelReason || 'Sanatçı mazereti');
+    if (!res.success) {
+      setActionFeedback({ type: 'error', text: res.error || 'Rezervasyon iptal edilemedi.' });
+    } else {
+      setActionFeedback({ type: 'success', text: 'İptal talebi kaydedildi.' });
+    }
     setCancellingBookingId(null);
     setCancelReason('');
+  };
+
+  const runAction = async (fn: () => Promise<{ success: boolean; error?: string }>, successText: string) => {
+    setActionFeedback(null);
+    const res = await fn();
+    if (!res.success) {
+      setActionFeedback({ type: 'error', text: res.error || 'İşlem tamamlanamadı.' });
+    } else {
+      setActionFeedback({ type: 'success', text: successText });
+    }
+    return res;
   };
 
   const activeContract = contractViewBookingId
@@ -173,6 +193,14 @@ export const ArtistDashboard: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigateTo('profile_edit')}
+              className="px-3.5 py-2 rounded-xl bg-[#f25922] hover:bg-[#d94b18] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Profili Düzenle</span>
+            </button>
             <button
               type="button"
               onClick={() => navigateTo('artist_studio')}
@@ -241,6 +269,25 @@ export const ArtistDashboard: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {actionFeedback && (
+        <div
+          role="alert"
+          className={`p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-3 ${
+            actionFeedback.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {actionFeedback.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+            <span>{actionFeedback.text}</span>
+          </div>
+          <button type="button" onClick={() => setActionFeedback(null)} className="underline shrink-0 cursor-pointer">
+            Kapat
+          </button>
+        </div>
+      )}
 
       {/* TAB: BOOKINGS */}
       {activeTab === 'bookings' && (
@@ -343,7 +390,7 @@ export const ArtistDashboard: React.FC = () => {
                         {b.status === 'agreement_pending' && !b.contractTermsAcceptedByPerformer && (
                           <button
                             type="button"
-                            onClick={() => acceptContract(b.id)}
+                            onClick={() => runAction(() => acceptContract(b.id), 'Dijital sözleşme onaylandı.')}
                             className="px-4 py-2 text-xs font-bold text-white bg-[#f25922] rounded-xl cursor-pointer"
                           >
                             Sözleşmeyi Onayla
@@ -353,7 +400,7 @@ export const ArtistDashboard: React.FC = () => {
                         {(b.status === 'confirmed' || b.status === 'employer_completed') && !b.performerCompletedAt && (
                           <button
                             type="button"
-                            onClick={() => completePerformerService(b.id)}
+                            onClick={() => runAction(() => completePerformerService(b.id), 'Hizmet tamamlanma bildiriminiz kaydedildi.')}
                             className="px-4 py-2 text-xs font-bold text-white bg-[#16274e] dark:bg-[#f25922] rounded-xl flex items-center gap-1.5 cursor-pointer"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -421,15 +468,28 @@ export const ArtistDashboard: React.FC = () => {
                   </div>
                   <div className="text-xs text-[#475569] dark:text-slate-300 italic">&ldquo;{app.message}&rdquo;</div>
                 </div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-[#f8fafc] dark:bg-[#0f1c38] text-[#475569] dark:text-slate-300">
-                  {app.status === 'shortlisted'
-                    ? 'Kısa Listeye Alındınız'
-                    : app.status === 'selected'
-                    ? 'Seçildiniz'
-                    : app.status === 'rejected'
-                    ? 'Reddedildi'
-                    : 'İnceleniyor'}
-                </span>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-[#f8fafc] dark:bg-[#0f1c38] text-[#475569] dark:text-slate-300">
+                    {app.status === 'shortlisted'
+                      ? 'Kısa Listeye Alındınız'
+                      : app.status === 'selected'
+                      ? 'Seçildiniz'
+                      : app.status === 'rejected'
+                      ? 'Reddedildi'
+                      : app.status === 'withdrawn'
+                      ? 'Geri Çekildi'
+                      : 'İnceleniyor'}
+                  </span>
+                  {['submitted', 'shortlisted'].includes(app.status) && (
+                    <button
+                      type="button"
+                      onClick={() => runAction(() => withdrawApplication(app.id), 'Başvurunuz geri çekildi.')}
+                      className="px-3 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-semibold cursor-pointer"
+                    >
+                      Başvuruyu Geri Çek
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}
@@ -461,7 +521,7 @@ export const ArtistDashboard: React.FC = () => {
                   {['pending', 'countered'].includes(off.status) && (
                     <div className="flex flex-wrap justify-end gap-2">
                       {waitingForMe && (
-                        <button type="button" onClick={() => acceptOffer(off.id)} className="px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">
+                        <button type="button" onClick={() => runAction(() => acceptOffer(off.id), 'Teklif kabul edildi ve sözleşme başlatıldı.')} className="px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold cursor-pointer">
                           Teklifi Kabul Et
                         </button>
                       )}
@@ -475,7 +535,7 @@ export const ArtistDashboard: React.FC = () => {
                       >
                         Karşı Teklif Gönder
                       </button>
-                      <button type="button" onClick={() => rejectOffer(off.id)} className="px-3 py-2 rounded-xl text-rose-700 text-xs font-semibold cursor-pointer">
+                      <button type="button" onClick={() => runAction(() => rejectOffer(off.id), 'Teklif reddedildi.')} className="px-3 py-2 rounded-xl text-rose-700 text-xs font-semibold cursor-pointer">
                         Reddet
                       </button>
                     </div>
@@ -582,7 +642,14 @@ export const ArtistDashboard: React.FC = () => {
             <textarea rows={2} value={counterNote} onChange={(e) => setCounterNote(e.target.value)} placeholder="Kapsam / teknik şart notu..." className="w-full text-xs p-3 rounded-xl border border-[#e2e8f0] dark:border-[#1e335a] bg-[#f8fafc] dark:bg-[#0f1c38]" />
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setCounterOfferId(null)} className="px-4 py-2 text-xs">Vazgeç</button>
-              <button type="button" onClick={async () => { await counterOffer(counterOfferId, counterAmount, counterNote); setCounterOfferId(null); }} className="px-4 py-2 text-xs font-bold text-white bg-[#f25922] rounded-xl cursor-pointer">
+              <button
+                type="button"
+                onClick={async () => {
+                  await runAction(() => counterOffer(counterOfferId, counterAmount, counterNote), 'Karşı teklif gönderildi.');
+                  setCounterOfferId(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-[#f25922] rounded-xl cursor-pointer"
+              >
                 Gönder
               </button>
             </div>

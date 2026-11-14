@@ -43,7 +43,7 @@ export const AnimatedCounter: React.FC<AnimatedCounterProps> = ({
 
     const tick = (now: number) => {
       const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / durationMs);
+      const progress = Math.max(0, Math.min(1, elapsed / durationMs));
       const eased = 1 - Math.pow(1 - progress, 3);
       const next = startVal + delta * eased;
       currentRef.current = next;

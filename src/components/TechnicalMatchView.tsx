@@ -117,6 +117,17 @@ export const TechnicalMatchView: React.FC = () => {
     }
   };
 
+  const handleRejectQuote = async (quoteId: string) => {
+    setFeedback(null);
+    try {
+      await apiRequest(`/api/technical-quotes/${quoteId}/reject`, { method: 'POST' });
+      await refreshBootstrap();
+      setFeedback({ type: 'success', text: 'Teknik teklif reddedildi.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'Teklif reddedilemedi.' });
+    }
+  };
+
   return (
     <div className="space-y-8 text-left">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
@@ -298,16 +309,27 @@ export const TechnicalMatchView: React.FC = () => {
                           <span className="inline-flex items-center gap-1 text-emerald-600 font-bold">
                             <Lock className="w-3.5 h-3.5" /> Onaylandı
                           </span>
+                        ) : q.status === 'rejected' ? (
+                          <span className="text-rose-600 font-bold">Reddedildi</span>
                         ) : (
                           isRequester &&
                           req.status !== 'accepted' && (
-                            <button
-                              type="button"
-                              onClick={() => handleAcceptQuote(q.id)}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
-                            >
-                              Teklifi Onayla
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleAcceptQuote(q.id)}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                              >
+                                Teklifi Onayla
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRejectQuote(q.id)}
+                                className="px-3 py-1.5 rounded-lg text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-bold cursor-pointer"
+                              >
+                                Reddet
+                              </button>
+                            </div>
                           )
                         )}
                       </div>

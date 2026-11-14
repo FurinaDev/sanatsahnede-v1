@@ -10,6 +10,9 @@ import {
   mapLedgerEntry,
   mapListing,
   mapOpportunity,
+  mapProject,
+  mapTechnicalProvider,
+  mapVenue,
   mapVerification,
 } from '../db/mappers';
 import { newId } from '../utils/crypto';
@@ -109,12 +112,29 @@ export function createAdminRouter(db: DbInstance): Router {
         WHERE id = ?
       `).run(note, req.user!.id, now, vr.id);
 
-      db.prepare(`UPDATE users SET kyc_status = 'rejected' WHERE id = ?`).run(vr.user_id);
+      db.prepare(`UPDATE users SET is_verified = 0, kyc_status = 'rejected' WHERE id = ?`).run(vr.user_id);
+
+      if (vr.account_type === 'business') {
+        db.prepare(`UPDATE business_profiles SET is_verified = 0, verification_status = 'rejected' WHERE user_id = ?`).run(vr.user_id);
+      } else if (vr.account_type === 'ensemble') {
+        db.prepare(`UPDATE ensembles SET is_verified = 0, verification_status = 'rejected' WHERE leader_user_id = ?`).run(vr.user_id);
+      } else {
+        db.prepare(`UPDATE individual_profiles SET is_verified = 0, verification_status = 'rejected' WHERE user_id = ?`).run(vr.user_id);
+      }
+
       notifyUser(db, {
         userId: vr.user_id,
         type: 'verification_rejected',
         title: 'Doğrulama Başvurusu Güncellemesi',
         body: `Başvurunuz reddedildi: ${note}`,
+      });
+
+      logAudit(db, {
+        userId: req.user!.id,
+        action: 'REJECT_VERIFICATION',
+        resourceType: 'verification_request',
+        resourceId: vr.id,
+        details: { note },
       });
 
       const updated = db.prepare('SELECT * FROM verification_requests WHERE id = ?').get(vr.id);
@@ -159,6 +179,15 @@ export function createAdminRouter(db: DbInstance): Router {
         if (!row) return res.status(404).json({ error: 'Fırsat bulunamadı.' });
         logAudit(db, { userId: req.user!.id, action: `MODERATE_OPPORTUNITY_${decision.toUpperCase()}`, resourceType: 'opportunity', resourceId: id });
         return res.json({ opportunity: mapOpportunity(row) });
+      }
+
+      if (entityType === 'project') {
+        const nextStatus = decision === 'approve' ? 'recruiting' : 'archived';
+        db.prepare('UPDATE projects SET status = ? WHERE id = ?').run(nextStatus, id);
+        const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+        if (!row) return res.status(404).json({ error: 'Proje bulunamadı.' });
+        logAudit(db, { userId: req.user!.id, action: `MODERATE_PROJECT_${decision.toUpperCase()}`, resourceType: 'project', resourceId: id });
+        return res.json({ project: mapProject(row) });
       }
 
       return res.status(400).json({ error: 'Desteklenmeyen içerik türü.' });
@@ -274,6 +303,82 @@ export function createAdminRouter(db: DbInstance): Router {
     const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(userRow.id);
     return res.json({ user: rowToUser(updated) });
   });
+
+  // User Status Toggle (Active / Suspended - Admin only)
+  router.patch('/users/:id/status', requireAuth, requireRole('admin'), (req: AuthedRequest, res) => {
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+    if (!userRow) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+    if (userRow.id === req.user!.id) {
+      return res.status(400).json({ error: 'Kendi yönetici hesabınızı askıya alamazsınız.' });
+    }
+    const { status } = req.body || {};
+    if (!['active', 'suspended'].includes(status)) {
+      return res.status(400).json({ error: 'Geçersiz kullanıcı durumu.' });
+    }
+    db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, userRow.id);
+    if (status === 'suspended') {
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userRow.id);
+    }
+    logAudit(db, { userId: req.user!.id, action: 'UPDATE_USER_STATUS', resourceType: 'user', resourceId: userRow.id, details: { status } });
+    const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(userRow.id);
+    return res.json({ user: rowToUser(updated) });
+  });
+
+  // Verify Venue (Admin / Verification Officer)
+  router.post(
+    '/venues/:id/verify',
+    requireAuth,
+    requireRole('admin', 'verification_officer'),
+    (req: AuthedRequest, res) => {
+      const venue = db.prepare('SELECT * FROM venues WHERE id = ?').get(req.params.id) as any;
+      if (!venue) return res.status(404).json({ error: 'Mekân bulunamadı.' });
+      const verified = req.body?.isVerified !== false ? 1 : 0;
+      db.prepare('UPDATE venues SET is_verified = ? WHERE id = ?').run(verified, venue.id);
+      notifyUser(db, {
+        userId: venue.manager_user_id,
+        type: 'venue_verification',
+        title: verified ? 'Mekânınız Doğrulandı' : 'Mekân Doğrulaması Kaldırıldı',
+        body: `"${venue.name}" mekânının doğrulama durumu güncellendi.`,
+        linkView: 'venue_dashboard',
+      });
+      logAudit(db, {
+        userId: req.user!.id,
+        action: verified ? 'VERIFY_VENUE' : 'UNVERIFY_VENUE',
+        resourceType: 'venue',
+        resourceId: venue.id,
+      });
+      const updated = db.prepare('SELECT * FROM venues WHERE id = ?').get(venue.id);
+      return res.json({ venue: mapVenue(db, updated) });
+    }
+  );
+
+  // Verify Technical Provider (Admin / Verification Officer)
+  router.post(
+    '/technical-providers/:id/verify',
+    requireAuth,
+    requireRole('admin', 'verification_officer'),
+    (req: AuthedRequest, res) => {
+      const tp = db.prepare('SELECT * FROM technical_providers WHERE id = ?').get(req.params.id) as any;
+      if (!tp) return res.status(404).json({ error: 'Teknik sağlayıcı bulunamadı.' });
+      const verified = req.body?.isVerified !== false ? 1 : 0;
+      db.prepare('UPDATE technical_providers SET is_verified = ? WHERE id = ?').run(verified, tp.id);
+      notifyUser(db, {
+        userId: tp.user_id,
+        type: 'technical_verification',
+        title: verified ? 'Teknik Sağlayıcı Profiliniz Doğrulandı' : 'Teknik Sağlayıcı Doğrulaması Kaldırıldı',
+        body: `"${tp.name}" profilinizin doğrulama durumu güncellendi.`,
+        linkView: 'technical_dashboard',
+      });
+      logAudit(db, {
+        userId: req.user!.id,
+        action: verified ? 'VERIFY_TECHNICAL_PROVIDER' : 'UNVERIFY_TECHNICAL_PROVIDER',
+        resourceType: 'technical_provider',
+        resourceId: tp.id,
+      });
+      const updated = db.prepare('SELECT * FROM technical_providers WHERE id = ?').get(tp.id);
+      return res.json({ technicalProvider: mapTechnicalProvider(db, updated) });
+    }
+  );
 
   // Sandbox Demo Reset
   router.post('/reset-demo', requireAuth, requireRole('admin'), (req: AuthedRequest, res) => {

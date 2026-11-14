@@ -73,6 +73,80 @@ export function createVenuesRouter(db: DbInstance): Router {
     return res.status(201).json({ venue: mapVenue(db, created) });
   });
 
+  router.patch('/venues/:id', requireAuth, requireFeatureFlag(db, 'open_stage_network'), (req: AuthedRequest, res) => {
+    const venue = db.prepare('SELECT * FROM venues WHERE id = ?').get(req.params.id) as any;
+    if (!venue) return res.status(404).json({ error: 'Mekân bulunamadı.' });
+    if (venue.manager_user_id !== req.user!.id && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu mekânı düzenleme yetkiniz yok.' });
+    }
+
+    const { name, city, district, address, description, contactPhone, contactEmail } = req.body || {};
+    db.prepare(`
+      UPDATE venues SET
+        name = COALESCE(?, name),
+        city = COALESCE(?, city),
+        district = COALESCE(?, district),
+        address = COALESCE(?, address),
+        description = COALESCE(?, description),
+        contact_phone = COALESCE(?, contact_phone),
+        contact_email = COALESCE(?, contact_email)
+      WHERE id = ?
+    `).run(
+      name !== undefined ? String(name).trim() : null,
+      city ?? null,
+      district ?? null,
+      address ?? null,
+      description ?? null,
+      contactPhone ?? null,
+      contactEmail ?? null,
+      venue.id
+    );
+
+    const updated = db.prepare('SELECT * FROM venues WHERE id = ?').get(venue.id);
+    return res.json({ venue: mapVenue(db, updated) });
+  });
+
+  router.post('/venues/:id/spaces', requireAuth, requireFeatureFlag(db, 'open_stage_network'), (req: AuthedRequest, res) => {
+    const venue = db.prepare('SELECT * FROM venues WHERE id = ?').get(req.params.id) as any;
+    if (!venue) return res.status(404).json({ error: 'Mekân bulunamadı.' });
+    if (venue.manager_user_id !== req.user!.id && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu mekâna salon ekleme yetkiniz yok.' });
+    }
+
+    const { name, seatedCapacity = 0, standingCapacity = 0, stageDimensions = '', technicalEquipment = [] } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Salon adı zorunludur.' });
+    }
+
+    db.prepare(`
+      INSERT INTO venue_spaces (id, venue_id, name, seated_capacity, standing_capacity, stage_dimensions, technical_equipment_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      newId('space'),
+      venue.id,
+      String(name).trim(),
+      Number(seatedCapacity || 0),
+      Number(standingCapacity || 0),
+      stageDimensions,
+      JSON.stringify(Array.isArray(technicalEquipment) ? technicalEquipment : [])
+    );
+
+    const updated = db.prepare('SELECT * FROM venues WHERE id = ?').get(venue.id);
+    return res.status(201).json({ venue: mapVenue(db, updated) });
+  });
+
+  router.delete('/venues/:id/spaces/:spaceId', requireAuth, (req: AuthedRequest, res) => {
+    const venue = db.prepare('SELECT * FROM venues WHERE id = ?').get(req.params.id) as any;
+    if (!venue) return res.status(404).json({ error: 'Mekân bulunamadı.' });
+    if (venue.manager_user_id !== req.user!.id && req.user!.activeRole !== 'admin') {
+      return res.status(403).json({ error: 'Bu salonu silme yetkiniz yok.' });
+    }
+
+    db.prepare('DELETE FROM venue_spaces WHERE id = ? AND venue_id = ?').run(req.params.spaceId, venue.id);
+    const updated = db.prepare('SELECT * FROM venues WHERE id = ?').get(venue.id);
+    return res.json({ venue: mapVenue(db, updated) });
+  });
+
   // Update Accessibility Spec (owner or staff)
   router.put('/venues/:id/accessibility', requireAuth, requireFeatureFlag(db, 'accessible_arts'), (req: AuthedRequest, res) => {
     const venue = db.prepare('SELECT * FROM venues WHERE id = ?').get(req.params.id) as any;

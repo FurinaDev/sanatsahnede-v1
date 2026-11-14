@@ -177,7 +177,7 @@ export const Navbar: React.FC = () => {
     { label: 'Etkinlikler', view: 'events' as const, match: ['events', 'event_detail'] },
   ];
 
-  const ecosystemLinks: Array<{ label: string; desc: string; view: AppView; icon: any; flag?: string }> = [
+  const rawEcosystemLinks: Array<{ label: string; desc: string; view: AppView; icon: any; flag?: string }> = [
     { label: 'Sahne Takvimi & Açık Sahne', desc: 'Mekân müsaitlikleri ve ücretsiz prova slotları', view: 'open_stage', icon: CalendarDays, flag: 'open_stage_network' },
     { label: 'Proje Lab & Ortak Üretim', desc: 'Disiplinlerarası ekip ve proje çağrıları', view: 'project_lab', icon: Layers, flag: 'project_lab' },
     { label: 'Teknik Eşleşme', desc: 'Ses, ışık, rider ve envanter teklifleri', view: 'technical_match', icon: Wrench, flag: 'technical_match' },
@@ -186,7 +186,8 @@ export const Navbar: React.FC = () => {
     { label: 'Kurumsal Kültür Masası', desc: 'Çok şubeli kurumlar için yıllık sanat programı', view: 'culture_desk', icon: Building2, flag: 'culture_desk' },
     { label: 'Sanatçı Stüdyosu & EPK', desc: 'Çoklu kimlik portfolyo ve QR paylaşımı', view: 'artist_studio', icon: Briefcase, flag: 'artist_studio' },
     { label: 'Kariyer Pasaportu', desc: 'Doğrulanmış sahne ve performans sicili', view: 'career_passport', icon: Award, flag: 'career_passport' },
-  ].filter((item) => !item.flag || isFlagEnabled(item.flag));
+  ];
+  const ecosystemLinks = rawEcosystemLinks.filter((item) => !item.flag || isFlagEnabled(item.flag));
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
@@ -208,25 +209,25 @@ export const Navbar: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-50 bg-white dark:bg-[#0f1c38] border-b border-slate-200 dark:border-[#1e335a] transition-colors">
-      <div className="max-w-[1720px] mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-18 flex lg:grid lg:grid-cols-[1fr_auto_1fr] items-center justify-between gap-3 lg:gap-4">
+      <div className="max-w-[1720px] mx-auto px-3 sm:px-5 lg:px-6 h-16 sm:h-18 flex items-center justify-between gap-2 lg:gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:gap-4">
         {/* Brand Lockup */}
         <button
           type="button"
           onClick={() => navigateTo('home')}
-          className="lg:justify-self-start flex items-center gap-2.5 sm:gap-3 group text-left shrink-0 focus:outline-hidden cursor-pointer"
+          className="xl:justify-self-start flex items-center gap-1.5 sm:gap-2 group text-left shrink-0 focus:outline-hidden cursor-pointer"
         >
-          <div className="relative w-11 h-9 sm:w-12 sm:h-10 bg-[#E45424] rounded-xl flex items-center justify-center shadow-sm overflow-hidden transition-transform duration-200 group-hover:scale-105 shrink-0 px-1.5">
+          <div className="relative w-8 h-8 sm:w-9 sm:h-9 2xl:w-10 2xl:h-9 bg-[#E45424] rounded-xl flex items-center justify-center shadow-sm overflow-hidden transition-transform duration-200 group-hover:scale-105 shrink-0 px-1.5">
             <BrandSymbol className="w-full h-full text-white" strokeWidth={3.6} />
           </div>
           <div className="flex items-center shrink-0">
-            <span className="font-sans font-extrabold text-sm xl:text-lg tracking-tight text-slate-900 dark:text-white leading-none whitespace-nowrap">
+            <span className="font-sans font-extrabold text-[13px] sm:text-sm 2xl:text-lg tracking-tight text-slate-900 dark:text-white leading-none whitespace-nowrap">
               SANAT<span className="text-[#E45424]">SAHNEDE</span>.COM
             </span>
           </div>
         </button>
 
         {/* Primary Desktop Navigation */}
-        <nav className="hidden lg:flex lg:justify-self-center items-center gap-1 xl:gap-2.5 2xl:gap-4 font-medium text-[13px] xl:text-sm text-slate-600 dark:text-slate-300 min-w-0">
+        <nav className="hidden xl:flex xl:justify-self-center items-center gap-0.5 xl:gap-1 2xl:gap-2 font-medium text-[13px] 2xl:text-[13.5px] text-slate-600 dark:text-slate-300 shrink-0">
           {navLinks.map((item) => {
             const isActive = item.match.includes(activeView as any);
             return (
@@ -234,7 +235,7 @@ export const Navbar: React.FC = () => {
                 type="button"
                 key={item.label}
                 onClick={() => navigateTo(item.view)}
-                className={`relative py-2 px-2 xl:px-2.5 rounded-lg whitespace-nowrap shrink-0 flex items-center transition-colors cursor-pointer ${
+                className={`relative py-2 px-1.5 xl:px-2 2xl:px-2.5 rounded-lg whitespace-nowrap shrink-0 flex items-center leading-none transition-colors cursor-pointer ${
                   isActive
                     ? 'text-[#f25922] font-semibold'
                     : 'hover:text-[#16274e] dark:hover:text-white font-medium'
@@ -244,7 +245,7 @@ export const Navbar: React.FC = () => {
                 {isActive && (
                   <span
                     aria-hidden="true"
-                    className="absolute bottom-0.5 inset-x-2 xl:inset-x-2.5 h-0.5 rounded-full bg-[#f25922]"
+                    className="absolute bottom-0.5 inset-x-1.5 xl:inset-x-2 2xl:inset-x-2.5 h-0.5 rounded-full bg-[#f25922]"
                   />
                 )}
               </button>
@@ -253,19 +254,30 @@ export const Navbar: React.FC = () => {
 
           {/* Ecosystem Dropdown */}
           <div ref={ecoMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setEcoMenuOpen((p) => !p)}
-              className={`py-2 px-2.5 rounded-lg whitespace-nowrap shrink-0 flex items-center gap-1 transition-colors cursor-pointer ${
-                ['open_stage', 'project_lab', 'project_workspace', 'technical_match', 'opportunity_radar', 'originals', 'culture_desk', 'artist_studio', 'career_passport'].includes(activeView)
-                  ? 'text-[#f25922] font-semibold'
-                  : 'hover:text-[#16274e] dark:hover:text-white font-medium'
-              }`}
-            >
-              <Compass className="w-3.5 h-3.5 text-[#E45424]" />
-              <span>Ekosistem</span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${ecoMenuOpen ? 'rotate-180' : ''}`} />
-            </button>
+            {(() => {
+              const isEcoActive = ['open_stage', 'project_lab', 'project_workspace', 'technical_match', 'opportunity_radar', 'originals', 'culture_desk', 'artist_studio', 'career_passport'].includes(activeView);
+              return (
+                <button
+                  type="button"
+                  onClick={() => setEcoMenuOpen((p) => !p)}
+                  className={`relative py-2 px-1.5 xl:px-2 2xl:px-2.5 rounded-lg whitespace-nowrap shrink-0 flex items-center gap-1 leading-none transition-colors cursor-pointer ${
+                    isEcoActive
+                      ? 'text-[#f25922] font-semibold'
+                      : 'hover:text-[#16274e] dark:hover:text-white font-medium'
+                  }`}
+                >
+                  <Compass className="w-3.5 h-3.5 text-[#E45424]" />
+                  <span>Ekosistem</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${ecoMenuOpen ? 'rotate-180' : ''}`} />
+                  {isEcoActive && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute bottom-0.5 inset-x-1.5 xl:inset-x-2 2xl:inset-x-2.5 h-0.5 rounded-full bg-[#f25922]"
+                    />
+                  )}
+                </button>
+              );
+            })()}
 
             <AnimatePresence>
               {ecoMenuOpen && (
@@ -305,16 +317,22 @@ export const Navbar: React.FC = () => {
           <button
             type="button"
             onClick={() => navigateTo('contact')}
-            className={`relative py-2 px-2 xl:px-2.5 rounded-lg whitespace-nowrap shrink-0 flex items-center transition-colors cursor-pointer ${
+            className={`relative py-2 px-1.5 xl:px-2 2xl:px-2.5 rounded-lg whitespace-nowrap shrink-0 flex items-center leading-none transition-colors cursor-pointer ${
               activeView === 'contact' ? 'text-[#f25922] font-semibold' : 'hover:text-[#16274e] dark:hover:text-white font-medium'
             }`}
           >
             <span>İletişim</span>
+            {activeView === 'contact' && (
+              <span
+                aria-hidden="true"
+                className="absolute bottom-0.5 inset-x-1.5 xl:inset-x-2 2xl:inset-x-2.5 h-0.5 rounded-full bg-[#f25922]"
+              />
+            )}
           </button>
         </nav>
 
         {/* Right Utility & Action Zone */}
-        <div className="lg:justify-self-end flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="xl:justify-self-end flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             type="button"
             aria-label="Tema Değiştir"
@@ -331,7 +349,7 @@ export const Navbar: React.FC = () => {
                 type="button"
                 aria-label="Mesajlar"
                 onClick={() => navigateTo('messages')}
-                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+                className="hidden sm:inline-flex p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4" />
               </button>
@@ -400,16 +418,16 @@ export const Navbar: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center gap-1.5 sm:gap-2 p-1 md:pr-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  className="flex items-center gap-1.5 sm:gap-2 p-1 md:pr-2 xl:pr-1 2xl:pr-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <img
                     src={currentUser.avatarUrl}
                     alt={currentUser.firstName}
                     className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover border border-slate-200 dark:border-slate-700"
                   />
-                  <div className="hidden md:flex flex-col text-left leading-tight">
-                    <span className="text-xs font-bold text-slate-800 dark:text-white">{currentUser.firstName}</span>
-                    <span className="text-[10px] text-[#E45424] font-semibold">{ROLE_LABELS[activeRole]}</span>
+                  <div className="hidden md:flex xl:hidden 2xl:flex flex-col text-left leading-tight max-w-[92px] 2xl:max-w-[116px]">
+                    <span className="text-xs font-bold text-slate-800 dark:text-white truncate">{currentUser.firstName}</span>
+                    <span className="text-[10px] text-[#E45424] font-semibold truncate">{ROLE_LABELS[activeRole]}</span>
                   </div>
                   <ChevronDown
                     className={`hidden sm:inline w-3 h-3 text-slate-400 transition-transform duration-200 ${
@@ -529,7 +547,7 @@ export const Navbar: React.FC = () => {
           <button
             type="button"
             onClick={handlePostListingClick}
-            className="hidden sm:inline-flex items-center gap-1.5 xl:gap-2 bg-[#E45424] hover:bg-[#c94317] text-white text-xs xl:text-sm font-semibold px-3 xl:px-4 py-2 xl:py-2.5 rounded-xl shadow-md shadow-[#E45424]/20 transition-[background-color,transform] duration-150 active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer"
+            className="hidden sm:inline-flex items-center gap-1.5 bg-[#E45424] hover:bg-[#c94317] text-white text-xs font-semibold px-2.5 2xl:px-3.5 py-2 rounded-xl shadow-md shadow-[#E45424]/20 transition-[background-color,transform] duration-150 active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Megaphone className="w-4 h-4 shrink-0" />
             <span>Sahne İlanı Ver</span>
@@ -539,7 +557,7 @@ export const Navbar: React.FC = () => {
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 text-slate-700 dark:text-slate-200 hover:text-[#E45424] focus:outline-hidden rounded-xl border border-slate-200 dark:border-slate-800"
+            className="xl:hidden p-2 text-slate-700 dark:text-slate-200 hover:text-[#E45424] focus:outline-hidden rounded-xl border border-slate-200 dark:border-slate-800 shrink-0 cursor-pointer"
             aria-label="Menü"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -555,7 +573,7 @@ export const Navbar: React.FC = () => {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="lg:hidden overflow-hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] text-left max-h-[80vh] overflow-y-auto"
+            className="xl:hidden overflow-hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] text-left max-h-[80vh] overflow-y-auto"
           >
             <div className="px-4 pt-2 pb-4 space-y-1">
               {navLinks.map((item) => {
@@ -579,6 +597,21 @@ export const Navbar: React.FC = () => {
                 );
               })}
 
+              <button
+                type="button"
+                onClick={() => {
+                  navigateTo('contact');
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold flex items-center justify-between ${
+                  activeView === 'contact'
+                    ? 'bg-[#E45424] text-white font-bold'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <span>İletişim</span>
+              </button>
+
               <div className="pt-2 pb-1 px-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Ekosistem Modülleri
               </div>
@@ -597,6 +630,17 @@ export const Navbar: React.FC = () => {
               ))}
 
               <div className="pt-2 border-t border-slate-200 dark:border-slate-800 mt-2 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handlePostListingClick();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="sm:hidden w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold text-white bg-[#E45424] flex items-center gap-2"
+                >
+                  <Megaphone className="w-4 h-4" />
+                  <span>Sahne İlanı Ver</span>
+                </button>
                 {isAuthenticated ? (
                   <>
                     <button
@@ -620,6 +664,17 @@ export const Navbar: React.FC = () => {
                     >
                       <UserIcon className="w-4 h-4 text-[#E45424]" />
                       <span>Profilim</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigateTo('messages');
+                        setMobileMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                    >
+                      <MessageSquare className="w-4 h-4 text-[#E45424]" />
+                      <span>Mesaj Merkezi</span>
                     </button>
                     <button
                       type="button"

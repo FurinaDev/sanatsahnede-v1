@@ -87,7 +87,7 @@ export const HeroSection: React.FC = () => {
   );
 
   return (
-    <section className="relative pt-12 pb-14 lg:pt-16 lg:pb-18 overflow-hidden geo-grid border-b border-slate-200 dark:border-slate-800 bg-[#F9FAFC] dark:bg-[#0B1120] transition-colors">
+    <section className="relative pt-12 pb-14 lg:pt-16 lg:pb-18 overflow-hidden border-b border-slate-200 dark:border-slate-800 bg-[#F9FAFC] dark:bg-[#0B1120] transition-colors">
       <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         {/* Display Headline */}
         <motion.h1

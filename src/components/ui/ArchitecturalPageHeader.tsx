@@ -35,15 +35,6 @@ export const ArchitecturalPageHeader: React.FC<ArchitecturalPageHeaderProps> = (
 }) => {
   return (
     <section className="relative overflow-hidden bg-gradient-to-br from-[#16274e] via-[#13213e] to-[#0f1c38] border-b border-[#1e335a] py-7 sm:py-9 text-white">
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 opacity-15 pointer-events-none"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)',
-          backgroundSize: '36px 36px',
-        }}
-      />
 
       <motion.div
         initial={{ opacity: 0.75, y: 8 }}
